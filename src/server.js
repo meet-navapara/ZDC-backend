@@ -1,6 +1,7 @@
 import { createApp } from "./app.js";
 import { connectDB } from "./config/db.js";
 import { env } from "./config/env.js";
+import { shutdownAnalytics } from "./services/analytics.js";
 
 async function start() {
   try {
@@ -11,9 +12,19 @@ async function start() {
   }
 
   const app = createApp();
-  app.listen(env.port, () => {
+  const server = app.listen(env.port, () => {
     console.log(`[server] ZDC API listening on port ${env.port} (${env.nodeEnv})`);
   });
+
+  // Flush pending analytics events on shutdown.
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    process.on(signal, () => {
+      server.close(async () => {
+        await shutdownAnalytics();
+        process.exit(0);
+      });
+    });
+  }
 }
 
 start();

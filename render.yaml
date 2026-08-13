@@ -1,20 +1,42 @@
+# Render Blueprint for the ZDC backend API.
+# Deploy: push to your repo, then in Render choose "New +" > "Blueprint" and
+# point it at this repo. Render reads this file and provisions the service.
+# Secrets (sync: false) are entered once in the Render dashboard, never committed.
 services:
   - type: web
     name: zdc-backend
     runtime: node
     plan: free
+    region: oregon
     rootDir: backend
-    buildCommand: npm install
+    buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /api/health
+    autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
-      - key: JWT_EXPIRES_IN
-        value: 7d
+      # Render injects PORT automatically; the app reads process.env.PORT.
+      - key: TRUST_PROXY
+        value: "1"
+      - key: B2B_AUTO_APPROVE
+        value: "false"
+      # Comma-separated allowed frontend origins (your Vercel URL).
+      - key: CORS_ORIGINS
+        sync: false
+      # --- Secrets: set these in the Render dashboard ---
       - key: MONGODB_URI
         sync: false
       - key: JWT_SECRET
         sync: false
-      - key: CORS_ORIGINS
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: CLOUDINARY_URL
         sync: false
+      # --- Optional monitoring / analytics ---
+      - key: SENTRY_DSN
+        sync: false
+      - key: POSTHOG_API_KEY
+        sync: false
+      - key: POSTHOG_HOST
+        value: https://us.i.posthog.com

@@ -2,19 +2,27 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { User, ROLES } from "../models/User.js";
 import { signToken } from "../utils/jwt.js";
+import {
+  emailField,
+  passwordField,
+  loginPasswordField,
+  optionalText,
+  phoneField,
+  LIMITS,
+} from "../utils/validators.js";
 
 const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  email: emailField,
+  password: passwordField,
   role: z.enum(ROLES).optional(),
-  firstName: z.string().trim().optional(),
-  lastName: z.string().trim().optional(),
-  phone: z.string().trim().optional(),
+  firstName: optionalText(LIMITS.name),
+  lastName: optionalText(LIMITS.name),
+  phone: phoneField,
 });
 
 const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
+  email: emailField,
+  password: loginPasswordField,
 });
 
 export async function register(req, res, next) {

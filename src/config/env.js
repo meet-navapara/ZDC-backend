@@ -2,24 +2,63 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const required = ["MONGODB_URI", "JWT_SECRET"];
+const nodeEnv = process.env.NODE_ENV || "development";
+const isProd = nodeEnv === "production";
 
-for (const key of required) {
-  if (!process.env[key]) {
-    console.warn(`[env] Warning: ${key} is not set. Using a fallback is unsafe in production.`);
+const DEFAULT_JWT_SECRET = "dev-insecure-secret-change-me";
+const jwtSecret = process.env.JWT_SECRET || DEFAULT_JWT_SECRET;
+
+// In production we refuse to boot with insecure defaults — a leaked or default
+// JWT secret means anyone can mint valid tokens. Fail fast and loudly.
+if (isProd) {
+  const fatal = [];
+  if (!process.env.MONGODB_URI) fatal.push("MONGODB_URI is required in production");
+  if (!process.env.JWT_SECRET || jwtSecret === DEFAULT_JWT_SECRET) {
+    fatal.push("JWT_SECRET must be set to a strong, unique value in production");
+  }
+  if (jwtSecret.length < 32) {
+    fatal.push("JWT_SECRET should be at least 32 characters in production");
+  }
+  if (fatal.length) {
+    console.error("[env] Refusing to start due to unsafe configuration:");
+    for (const m of fatal) console.error(`  - ${m}`);
+    process.exit(1);
+  }
+} else {
+  for (const key of ["MONGODB_URI", "JWT_SECRET"]) {
+    if (!process.env[key]) {
+      console.warn(`[env] Warning: ${key} is not set. Using a dev fallback.`);
+    }
   }
 }
 
+// How many proxies to trust for client IP / rate limiting. On Render/Vercel the
+// app sits behind exactly one proxy, so default to 1 in production.
+function parseTrustProxy() {
+  const raw = process.env.TRUST_PROXY;
+  if (raw === undefined) return isProd ? 1 : 0;
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  const n = parseInt(raw, 10);
+  return Number.isNaN(n) ? raw : n;
+}
+
 export const env = {
-  nodeEnv: process.env.NODE_ENV || "development",
+  nodeEnv,
+  isProd,
   port: parseInt(process.env.PORT || "8080", 10),
   mongoUri: process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/zdc",
   jwt: {
-    secret: process.env.JWT_SECRET || "dev-insecure-secret-change-me",
+    secret: jwtSecret,
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",
   },
   corsOrigins: (process.env.CORS_ORIGINS || "http://localhost:3000")
     .split(",")
     .map((o) => o.trim())
     .filter(Boolean),
+  trustProxy: parseTrustProxy(),
+  // When false (default), new B2B accounts start as "pending" and must be
+  // approved by a Super Admin before they can operate. Set B2B_AUTO_APPROVE=true
+  // to activate new businesses immediately (e.g. for local development).
+  b2bAutoApprove: (process.env.B2B_AUTO_APPROVE || "false").toLowerCase() === "true",
 };
