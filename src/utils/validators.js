@@ -26,8 +26,6 @@ export const LIMITS = {
   branchName: 120,
 };
 
-export const MAX_BRANCH_COUNT = 20;
-
 // Money / count ceilings — generous but finite so a typo can't store absurd data.
 export const MAX_PRICE = 100_000_000;
 export const MAX_CREDITS = 1_000_000;

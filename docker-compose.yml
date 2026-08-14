@@ -1,0 +1,14 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: zimji-redis
+    ports:
+      # Host 6380 avoids clashing with a local Windows Redis on 6379
+      - "6380:6379"
+    volumes:
+      - zimji_redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+volumes:
+  zimji_redis_data:

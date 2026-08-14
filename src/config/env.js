@@ -61,4 +61,13 @@ export const env = {
   // approved by a Super Admin before they can operate. Set B2B_AUTO_APPROVE=true
   // to activate new businesses immediately (e.g. for local development).
   b2bAutoApprove: (process.env.B2B_AUTO_APPROVE || "false").toLowerCase() === "true",
+  smtp: {
+    host: process.env.SMTP_HOST || "",
+    port: parseInt(process.env.SMTP_PORT || "587", 10),
+    user: process.env.SMTP_USER || "",
+    pass: process.env.SMTP_PASS || "",
+    from: process.env.SMTP_FROM || process.env.SMTP_USER || "",
+  },
+  // Optional. When unset, the API skips Redis and reads from MongoDB only.
+  redisUrl: (process.env.REDIS_URL || "").trim(),
 };

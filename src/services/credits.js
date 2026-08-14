@@ -1,5 +1,9 @@
 import { CreditWallet } from "../models/CreditWallet.js";
 import { CreditLedger } from "../models/CreditLedger.js";
+import {
+  invalidateBusinessStats,
+  invalidatePlatformStats,
+} from "./cache.js";
 
 // Error thrown when a business tries to consume more credits than it has.
 export class InsufficientCreditsError extends Error {
@@ -50,6 +54,10 @@ export async function addCredits(
     payment,
     job,
   });
+  await Promise.all([
+    invalidateBusinessStats(businessId),
+    invalidatePlatformStats(),
+  ]);
   return wallet.balance;
 }
 
@@ -84,6 +92,10 @@ export async function consumeCredits(
     note,
     job,
   });
+  await Promise.all([
+    invalidateBusinessStats(businessId),
+    invalidatePlatformStats(),
+  ]);
   return wallet.balance;
 }
 

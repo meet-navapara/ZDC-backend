@@ -4,7 +4,8 @@ import { Payment } from "../models/Payment.js";
 import { getPaymentProvider } from "../services/payments.js";
 import { addCredits, getBalance, listLedger } from "../services/credits.js";
 import { capture } from "../services/analytics.js";
-import { slugField } from "../utils/validators.js";
+import { buildCreditInvoicePdf, invoiceContextForPayment } from "../services/invoice.js";
+import { objectIdField, slugField } from "../utils/validators.js";
 
 export async function listCreditPacks(req, res, next) {
   try {
@@ -62,6 +63,11 @@ export async function purchaseCredits(req, res, next) {
       purpose: "b2b_credits",
       status: charge.status,
       reference: charge.reference,
+      meta: {
+        packId: pack.id,
+        packLabel: pack.label,
+        credits: pack.credits,
+      },
     });
 
     if (charge.status !== "paid") {
@@ -83,17 +89,55 @@ export async function purchaseCredits(req, res, next) {
       balance,
     });
 
+    const paymentId = payment._id.toString();
     return res.json({
       balance,
       credited: pack.credits,
       payment: {
-        id: payment._id.toString(),
+        id: paymentId,
         status: payment.status,
         reference: payment.reference,
         amount: payment.amount,
         currency: payment.currency,
       },
+      // Frontend uses this to auto-download the PDF invoice.
+      invoiceUrl: `/api/b2b/credits/payments/${paymentId}/invoice.pdf`,
     });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ error: "Validation failed", details: err.issues });
+    }
+    return next(err);
+  }
+}
+
+export async function downloadCreditInvoice(req, res, next) {
+  try {
+    const id = objectIdField.parse(req.params.paymentId);
+    const payment = await Payment.findOne({
+      _id: id,
+      user: req.user.sub,
+      purpose: "b2b_credits",
+      status: "paid",
+    });
+    if (!payment) {
+      return res.status(404).json({ error: "Invoice not found" });
+    }
+
+    const ctx = await invoiceContextForPayment(payment);
+    const pdf = await buildCreditInvoicePdf({
+      payment,
+      pack: ctx.pack,
+      business: ctx.business,
+    });
+
+    const fileName = `zimji-invoice-${payment.reference || payment._id}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${fileName}"`
+    );
+    return res.send(pdf);
   } catch (err) {
     if (err instanceof z.ZodError) {
       return res.status(400).json({ error: "Validation failed", details: err.issues });

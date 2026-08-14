@@ -11,7 +11,12 @@ import {
   getWallet,
   getLedger,
   purchaseCredits,
+  downloadCreditInvoice,
 } from "../controllers/creditsController.js";
+import {
+  requestB2bSignupOtp,
+  verifyB2bSignupOtp,
+} from "../controllers/otpController.js";
 import {
   listCategories,
   createCategory,
@@ -20,6 +25,7 @@ import {
   listProducts,
   getProduct,
   createProduct,
+  bulkCreateProducts,
   updateProduct,
   deleteProduct,
 } from "../controllers/catalogController.js";
@@ -36,7 +42,10 @@ import { authLimiter } from "../middleware/rateLimit.js";
 
 const router = Router();
 
-// Public
+// Public — register requires email OTP verify before the account is created
+router.post("/register/otp/request", authLimiter, requestB2bSignupOtp);
+router.post("/register/otp/verify", authLimiter, verifyB2bSignupOtp);
+// Legacy direct register (kept for scripts); prefer OTP endpoints above
 router.post("/register", authLimiter, registerBusiness);
 router.get("/credits/packs", listCreditPacks);
 
@@ -55,6 +64,11 @@ router.get("/stats/export.xlsx", ...b2b, exportReport);
 router.get("/credits", ...b2b, getWallet);
 router.get("/credits/ledger", ...b2b, getLedger);
 router.post("/credits/purchase", ...b2b, purchaseCredits);
+router.get(
+  "/credits/payments/:paymentId/invoice.pdf",
+  ...b2b,
+  downloadCreditInvoice
+);
 
 // Branches (multi-location)
 router.get("/branches", ...b2b, listBranches);
@@ -73,6 +87,12 @@ router.delete("/categories/:id", ...b2b, deleteCategory);
 router.get("/products", ...b2b, listProducts);
 router.get("/products/:id", ...b2b, getProduct);
 router.post("/products", ...b2b, upload.array("images", 5), createProduct);
+router.post(
+  "/products/bulk",
+  ...b2b,
+  upload.array("images", 30),
+  bulkCreateProducts
+);
 router.patch("/products/:id", ...b2b, upload.array("images", 5), updateProduct);
 router.delete("/products/:id", ...b2b, deleteProduct);
 

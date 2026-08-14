@@ -1,9 +1,10 @@
 import { Router } from "express";
-import { optionalAuth } from "../middleware/auth.js";
-import { payForJob } from "../controllers/paymentsController.js";
+import { requireAuth } from "../middleware/auth.js";
+import { payForJob, listMyPayments } from "../controllers/paymentsController.js";
 
 const router = Router();
 
-router.post("/", optionalAuth, payForJob);
+router.get("/mine", requireAuth, listMyPayments);
+router.post("/", requireAuth, payForJob);
 
 export default router;

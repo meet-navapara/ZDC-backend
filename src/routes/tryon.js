@@ -1,19 +1,25 @@
 import { Router } from "express";
 import { upload } from "../middleware/upload.js";
-import { optionalAuth } from "../middleware/auth.js";
+import { optionalAuth, requireAuth } from "../middleware/auth.js";
 import {
   createJob,
   getJob,
   listPricing,
+  listMyJobs,
+  getMyStats,
 } from "../controllers/tryonController.js";
 
 const router = Router();
 
 router.get("/pricing", listPricing);
 
+// Consumer dashboard — must be registered before /:id
+router.get("/mine/stats", requireAuth, getMyStats);
+router.get("/mine", requireAuth, listMyJobs);
+
 router.post(
   "/",
-  optionalAuth,
+  requireAuth,
   upload.fields([
     { name: "source", maxCount: 1 },
     { name: "target", maxCount: 5 },
@@ -21,6 +27,6 @@ router.post(
   createJob
 );
 
-router.get("/:id", getJob);
+router.get("/:id", optionalAuth, getJob);
 
 export default router;

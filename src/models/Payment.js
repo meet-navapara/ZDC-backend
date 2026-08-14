@@ -14,6 +14,8 @@ const paymentSchema = new Schema(
     purpose: { type: String, default: "b2c_tryon" },
     status: { type: String, enum: PAYMENT_STATUSES, default: "pending" },
     reference: { type: String, default: null },
+    // Extra purchase details for invoices (pack label, credits, etc.).
+    meta: { type: Schema.Types.Mixed, default: null },
   },
   { timestamps: true }
 );

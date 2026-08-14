@@ -13,6 +13,8 @@ const businessSchema = new Schema(
     category: { type: String, enum: BUSINESS_CATEGORIES, default: "boutique" },
     logoUrl: { type: String, default: null },
     whatsapp: { type: String, trim: true, default: null },
+    // Billing currency chosen at signup (drives pack pricing display / payouts).
+    currency: { type: String, trim: true, uppercase: true, default: "KES" },
     address: {
       line1: { type: String, trim: true, default: null },
       city: { type: String, trim: true, default: null },
@@ -20,10 +22,8 @@ const businessSchema = new Schema(
       lat: { type: Number, default: null },
       lng: { type: Number, default: null },
     },
-    // Declared number of locations (registration "Number of Branches").
-    // Actual Branch documents are capped by this when set, and by
-    // MAX_BRANCHES_PER_BUSINESS otherwise.
-    branchCount: { type: Number, min: 1, max: 20, default: 1 },
+    // Kept for legacy profiles; branches are no longer capped by this field.
+    branchCount: { type: Number, min: 1, default: 1 },
   },
   { _id: false }
 );
@@ -43,7 +43,19 @@ const userSchema = new Schema(
     lastName: { type: String, trim: true },
     passwordHash: { type: String, required: true },
     status: { type: String, enum: STATUSES, default: "active" },
+    emailVerified: { type: Boolean, default: false },
     business: { type: businessSchema, default: undefined },
+    // B2C referral program
+    referralCode: {
+      type: String,
+      uppercase: true,
+      trim: true,
+      sparse: true,
+      unique: true,
+    },
+    referredBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    /** Free try-on renders earned via referrals (1 = one styled image job). */
+    freeTryons: { type: Number, min: 0, default: 0 },
   },
   { timestamps: true }
 );
@@ -57,14 +69,21 @@ userSchema.methods.toSafeJSON = function toSafeJSON() {
     firstName: this.firstName,
     lastName: this.lastName,
     status: this.status,
+    emailVerified: Boolean(this.emailVerified),
     createdAt: this.createdAt,
   };
+  if (this.role === "b2c") {
+    base.referralCode = this.referralCode || null;
+    base.freeTryons = this.freeTryons || 0;
+    base.referredBy = this.referredBy ? String(this.referredBy) : null;
+  }
   if (this.role === "b2b" && this.business) {
     base.business = {
       name: this.business.name,
       category: this.business.category,
       logoUrl: this.business.logoUrl,
       whatsapp: this.business.whatsapp || null,
+      currency: this.business.currency || "KES",
       address: this.business.address,
       branchCount: this.business.branchCount ?? 1,
     };

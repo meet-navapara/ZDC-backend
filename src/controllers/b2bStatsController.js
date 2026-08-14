@@ -23,11 +23,11 @@ export async function exportReport(req, res, next) {
       listLedger(businessId, { limit: 200 }),
     ]);
 
-    const shopName = user?.business?.name || user?.email || "ZDC Business";
+    const shopName = user?.business?.name || user?.email || "zimji Business";
     const generatedAt = new Date();
 
     const wb = new ExcelJS.Workbook();
-    wb.creator = "ZDC";
+    wb.creator = "zimji";
     wb.created = generatedAt;
 
     const brand = "FF2E7D5B"; // sage
@@ -116,7 +116,7 @@ export async function exportReport(req, res, next) {
     );
 
     const safeName = shopName.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-    const fileName = `zdc-report-${safeName}-${generatedAt
+    const fileName = `zimji-report-${safeName}-${generatedAt
       .toISOString()
       .slice(0, 10)}.xlsx`;
 

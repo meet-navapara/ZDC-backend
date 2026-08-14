@@ -2,10 +2,6 @@ import mongoose from "mongoose";
 
 const { Schema } = mongoose;
 
-// Soft ceiling so a shop can't create unlimited locations. Declared
-// `business.branchCount` on the owner profile can impose a tighter cap.
-export const MAX_BRANCHES_PER_BUSINESS = 20;
-
 const branchSchema = new Schema(
   {
     business: {

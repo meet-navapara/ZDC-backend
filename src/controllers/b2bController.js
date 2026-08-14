@@ -1,7 +1,6 @@
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { User, BUSINESS_CATEGORIES } from "../models/User.js";
-import { Branch } from "../models/Branch.js";
 import { signToken } from "../utils/jwt.js";
 import { getOrCreateWallet, getBalance } from "../services/credits.js";
 import { env } from "../config/env.js";
@@ -15,8 +14,8 @@ import {
   boundedText,
   latField,
   lngField,
+  currencyField,
   LIMITS,
-  MAX_BRANCH_COUNT,
 } from "../utils/validators.js";
 
 // Lenient address (used for profile updates — any subset may be edited).
@@ -47,12 +46,6 @@ const requiredPhoneField = z
   .max(LIMITS.phone)
   .regex(/^[+\d][\d\s()-]{3,}$/, "Enter a valid phone number");
 
-const branchCountField = z.coerce
-  .number()
-  .int()
-  .min(1, "At least 1 branch")
-  .max(MAX_BRANCH_COUNT, `At most ${MAX_BRANCH_COUNT} branches`);
-
 const registerSchema = z.object({
   email: emailField,
   password: passwordField,
@@ -64,8 +57,8 @@ const registerSchema = z.object({
     category: z.enum(BUSINESS_CATEGORIES).optional(),
     logoUrl: urlField,
     whatsapp: requiredPhoneField,
+    currency: currencyField.optional(),
     address: requiredAddressSchema,
-    branchCount: branchCountField.optional(),
   }),
 });
 
@@ -82,7 +75,6 @@ export async function registerBusiness(req, res, next) {
     // When approval is required, new businesses start as "pending" and can't
     // operate until a Super Admin approves them.
     const status = env.b2bAutoApprove ? "active" : "pending";
-    const branchCount = data.business.branchCount ?? 1;
     const user = await User.create({
       role: "b2b",
       email: data.email,
@@ -96,8 +88,8 @@ export async function registerBusiness(req, res, next) {
         category: data.business.category || "boutique",
         logoUrl: data.business.logoUrl || null,
         whatsapp: data.business.whatsapp || null,
+        currency: data.business.currency || "KES",
         address: data.business.address || {},
-        branchCount,
       },
     });
 
@@ -130,8 +122,8 @@ const updateProfileSchema = z.object({
       category: z.enum(BUSINESS_CATEGORIES).optional(),
       logoUrl: urlField,
       whatsapp: phoneField,
+      currency: currencyField.optional(),
       address: addressSchema,
-      branchCount: branchCountField.optional(),
     })
     .optional(),
 });
@@ -164,18 +156,9 @@ export async function updateProfile(req, res, next) {
       if (b.category !== undefined) user.business.category = b.category;
       if (b.logoUrl !== undefined) user.business.logoUrl = b.logoUrl || null;
       if (b.whatsapp !== undefined) user.business.whatsapp = b.whatsapp || null;
+      if (b.currency !== undefined) user.business.currency = b.currency;
       if (b.address) {
         user.business.address = { ...user.business.address, ...b.address };
-      }
-      if (b.branchCount !== undefined) {
-        // Don't allow lowering below how many branches already exist.
-        const existing = await Branch.countDocuments({ business: user._id });
-        if (b.branchCount < existing) {
-          return res.status(400).json({
-            error: `You already have ${existing} branch${existing === 1 ? "" : "es"}. Remove some before lowering the limit to ${b.branchCount}.`,
-          });
-        }
-        user.business.branchCount = b.branchCount;
       }
     }
 

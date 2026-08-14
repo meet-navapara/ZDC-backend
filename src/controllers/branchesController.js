@@ -1,8 +1,5 @@
 import { z } from "zod";
-import {
-  Branch,
-  MAX_BRANCHES_PER_BUSINESS,
-} from "../models/Branch.js";
+import { Branch } from "../models/Branch.js";
 import { User } from "../models/User.js";
 import {
   boundedText,
@@ -12,7 +9,6 @@ import {
   latField,
   lngField,
   LIMITS,
-  MAX_BRANCH_COUNT,
 } from "../utils/validators.js";
 
 const addressSchema = z
@@ -35,13 +31,6 @@ const createSchema = z.object({
 
 const updateSchema = createSchema.partial();
 
-async function branchCapFor(businessId) {
-  const user = await User.findById(businessId).select("business.branchCount");
-  const declared = user?.business?.branchCount;
-  const soft = Number.isFinite(declared) && declared > 0 ? declared : MAX_BRANCHES_PER_BUSINESS;
-  return Math.min(soft, MAX_BRANCHES_PER_BUSINESS, MAX_BRANCH_COUNT);
-}
-
 function toSafe(branch) {
   return branch.toJSONSafe();
 }
@@ -62,10 +51,8 @@ export async function listBranches(req, res, next) {
       });
     }
 
-    const cap = await branchCapFor(req.user.sub);
     return res.json({
       branches: branches.map(toSafe),
-      limit: cap,
       count: branches.length,
     });
   } catch (err) {
@@ -92,13 +79,6 @@ export async function createBranch(req, res, next) {
     const data = createSchema.parse(req.body);
     const businessId = req.user.sub;
     const count = await Branch.countDocuments({ business: businessId });
-    const cap = await branchCapFor(businessId);
-
-    if (count >= cap) {
-      return res.status(409).json({
-        error: `Branch limit reached (max ${cap}). Increase “Number of branches” in Settings to add more.`,
-      });
-    }
 
     const makePrimary = data.isPrimary === true || count === 0;
     if (makePrimary) {
@@ -115,6 +95,11 @@ export async function createBranch(req, res, next) {
       address: data.address || {},
       isPrimary: makePrimary,
       status: data.status || "active",
+    });
+
+    // Keep legacy branchCount in sync with actual locations (informational only).
+    await User.findByIdAndUpdate(businessId, {
+      $set: { "business.branchCount": count + 1 },
     });
 
     return res.status(201).json({ branch: toSafe(branch) });
@@ -198,6 +183,10 @@ export async function deleteBranch(req, res, next) {
         await nextPrimary.save();
       }
     }
+
+    await User.findByIdAndUpdate(req.user.sub, {
+      $set: { "business.branchCount": remaining },
+    });
 
     return res.json({ ok: true });
   } catch (err) {

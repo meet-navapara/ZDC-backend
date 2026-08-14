@@ -1,7 +1,9 @@
 import { createApp } from "./app.js";
 import { connectDB } from "./config/db.js";
 import { env } from "./config/env.js";
+import { getRedis, closeRedis, isRedisEnabled } from "./config/redis.js";
 import { shutdownAnalytics } from "./services/analytics.js";
+import { isMailConfigured } from "./services/mail.js";
 
 async function start() {
   try {
@@ -11,9 +13,24 @@ async function start() {
     process.exit(1);
   }
 
+  if (isRedisEnabled()) {
+    getRedis();
+    console.log("[redis] REDIS_URL set — cache enabled (fail-open to Mongo if down)");
+  } else {
+    console.log("[redis] REDIS_URL not set — running without cache");
+  }
+
+  if (isMailConfigured()) {
+    console.log("[mail] SMTP configured — signup OTP emails will be sent");
+  } else {
+    console.warn(
+      "[mail] SMTP not configured — signup OTP codes are logged / returned as devOtp in development"
+    );
+  }
+
   const app = createApp();
   const server = app.listen(env.port, () => {
-    console.log(`[server] ZDC API listening on port ${env.port} (${env.nodeEnv})`);
+    console.log(`[server] zimji API listening on port ${env.port} (${env.nodeEnv})`);
   });
 
   // Flush pending analytics events on shutdown.
@@ -21,6 +38,7 @@ async function start() {
     process.on(signal, () => {
       server.close(async () => {
         await shutdownAnalytics();
+        await closeRedis();
         process.exit(0);
       });
     });

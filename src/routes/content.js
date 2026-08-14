@@ -1,13 +1,13 @@
 import { Router } from "express";
-import { getContentDoc } from "../services/siteContent.js";
+import { getContentSafe } from "../services/siteContent.js";
 
 const router = Router();
 
 // Public, read-only site content used by the marketing landing page.
 router.get("/", async (req, res, next) => {
   try {
-    const doc = await getContentDoc();
-    return res.json({ content: doc.toJSONSafe() });
+    const content = await getContentSafe();
+    return res.json({ content });
   } catch (err) {
     return next(err);
   }

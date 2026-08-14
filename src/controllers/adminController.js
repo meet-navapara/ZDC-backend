@@ -8,8 +8,8 @@ import { Payment, PAYMENT_STATUSES } from "../models/Payment.js";
 import { CreditWallet } from "../models/CreditWallet.js";
 import { CreditLedger } from "../models/CreditLedger.js";
 import { getBalance } from "../services/credits.js";
-import { getPricingDoc, updatePricing } from "../services/pricing.js";
-import { getContentDoc, updateContent } from "../services/siteContent.js";
+import { getPricingSafe, updatePricing } from "../services/pricing.js";
+import { getContentSafe, updateContent } from "../services/siteContent.js";
 import { buildPlatformStats } from "../services/platformStats.js";
 import { recordAudit } from "../services/audit.js";
 import { AuditLog, AUDIT_ACTIONS } from "../models/AuditLog.js";
@@ -343,7 +343,7 @@ export async function listPayments(req, res, next) {
 /* ---------------------------- Catalogue oversight ------------------------- */
 
 // Read-only view of every product uploaded by boutiques/salons, so the operator
-// can monitor catalogue quality and volume across the whole platform.
+// can monitor catalogue quality and volume — with clear uploader attribution.
 export async function listCatalog(req, res, next) {
   try {
     const page = Math.max(1, parseInt(req.query.page || "1", 10));
@@ -354,57 +354,154 @@ export async function listCatalog(req, res, next) {
     const filter = {};
     if (status && PRODUCT_STATUSES.includes(status)) filter.status = status;
     if (business && /^[a-f\d]{24}$/i.test(business)) filter.business = business;
+
     if (q) {
       const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      filter.$or = [{ name: rx }, { sku: rx }];
+      // Also match products whose uploader business name / email / owner name fits.
+      const matchedUsers = await User.find({
+        role: "b2b",
+        $or: [
+          { email: rx },
+          { firstName: rx },
+          { lastName: rx },
+          { "business.name": rx },
+        ],
+      })
+        .select("_id")
+        .lean();
+      const uploaderIds = matchedUsers.map((u) => u._id);
+      filter.$or = [
+        { name: rx },
+        { sku: rx },
+        ...(uploaderIds.length ? [{ business: { $in: uploaderIds } }] : []),
+      ];
     }
 
-    const [total, products, active, archived, businessCount] = await Promise.all([
-      Product.countDocuments(filter),
-      Product.find(filter)
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .populate("business", "email business.name")
-        .populate("category", "name")
-        .lean(),
-      Product.countDocuments({ ...filter, status: "active" }),
-      Product.countDocuments({ ...filter, status: "archived" }),
-      Product.distinct("business", filter),
-    ]);
+    const [total, products, active, archived, businessIds, uploaderAgg] =
+      await Promise.all([
+        Product.countDocuments(filter),
+        Product.find(filter)
+          .sort({ createdAt: -1 })
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .populate(
+            "business",
+            "email firstName lastName phone business.name business.category business.currency"
+          )
+          .populate("category", "name")
+          .lean(),
+        Product.countDocuments({ ...filter, status: "active" }),
+        Product.countDocuments({ ...filter, status: "archived" }),
+        Product.distinct("business", filter),
+        Product.aggregate([
+          { $match: filter },
+          {
+            $group: {
+              _id: "$business",
+              productCount: { $sum: 1 },
+              activeCount: {
+                $sum: { $cond: [{ $eq: ["$status", "active"] }, 1, 0] },
+              },
+              archivedCount: {
+                $sum: { $cond: [{ $eq: ["$status", "archived"] }, 1, 0] },
+              },
+              lastUploadAt: { $max: "$createdAt" },
+            },
+          },
+          { $sort: { productCount: -1 } },
+          { $limit: 50 },
+          {
+            $lookup: {
+              from: "users",
+              localField: "_id",
+              foreignField: "_id",
+              as: "user",
+            },
+          },
+          { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
+          {
+            $project: {
+              _id: 0,
+              id: { $toString: "$_id" },
+              productCount: 1,
+              activeCount: 1,
+              archivedCount: 1,
+              lastUploadAt: 1,
+              email: "$user.email",
+              firstName: "$user.firstName",
+              lastName: "$user.lastName",
+              businessName: "$user.business.name",
+              category: "$user.business.category",
+            },
+          },
+        ]),
+      ]);
 
-    const rows = products.map((p) => ({
-      id: String(p._id),
-      name: p.name,
-      sku: p.sku || null,
-      price: p.price,
-      currency: p.currency || "KES",
-      status: p.status,
-      imageCount: Array.isArray(p.imageUrls) ? p.imageUrls.length : 0,
-      thumbnail: Array.isArray(p.imageUrls) && p.imageUrls.length ? p.imageUrls[0] : null,
-      category: p.category?.name || null,
-      createdAt: p.createdAt,
-      business: p.business
-        ? {
-            id: String(p.business._id),
-            email: p.business.email,
-            name: p.business.business?.name || null,
-          }
-        : null,
+    function uploaderLabel(u) {
+      if (!u) return null;
+      const person = [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
+      return u.businessName || person || u.email || "Unknown";
+    }
+
+    const rows = products.map((p) => {
+      const b = p.business;
+      const person = b
+        ? [b.firstName, b.lastName].filter(Boolean).join(" ").trim()
+        : "";
+      return {
+        id: String(p._id),
+        name: p.name,
+        sku: p.sku || null,
+        price: p.price,
+        currency: p.currency || "KES",
+        status: p.status,
+        imageCount: Array.isArray(p.imageUrls) ? p.imageUrls.length : 0,
+        thumbnail:
+          Array.isArray(p.imageUrls) && p.imageUrls.length
+            ? p.imageUrls[0]
+            : null,
+        category: p.category?.name || null,
+        createdAt: p.createdAt,
+        business: b
+          ? {
+              id: String(b._id),
+              email: b.email,
+              name: b.business?.name || null,
+              ownerName: person || null,
+              category: b.business?.category || null,
+              currency: b.business?.currency || null,
+              phone: b.phone || null,
+            }
+          : null,
+      };
+    });
+
+    const uploaders = uploaderAgg.map((u) => ({
+      id: u.id,
+      email: u.email || null,
+      name: uploaderLabel(u),
+      ownerName: [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || null,
+      businessName: u.businessName || null,
+      category: u.category || null,
+      productCount: u.productCount,
+      activeCount: u.activeCount,
+      archivedCount: u.archivedCount,
+      lastUploadAt: u.lastUploadAt,
     }));
 
     return res.json({
       products: rows,
+      uploaders,
       summary: {
         total,
         active,
         archived,
-        businesses: businessCount.length,
+        businesses: businessIds.length,
       },
       statuses: PRODUCT_STATUSES,
       page,
       limit,
-      pages: Math.ceil(total / limit),
+      pages: Math.ceil(total / limit) || 1,
     });
   } catch (err) {
     return next(err);
@@ -415,8 +512,8 @@ export async function listCatalog(req, res, next) {
 
 export async function getContent(req, res, next) {
   try {
-    const doc = await getContentDoc();
-    return res.json({ content: doc.toJSONSafe() });
+    const content = await getContentSafe();
+    return res.json({ content });
   } catch (err) {
     return next(err);
   }
@@ -479,8 +576,8 @@ export async function setContent(req, res, next) {
 
 export async function getPricing(req, res, next) {
   try {
-    const doc = await getPricingDoc();
-    return res.json({ pricing: doc.toJSONSafe() });
+    const pricing = await getPricingSafe();
+    return res.json({ pricing });
   } catch (err) {
     return next(err);
   }

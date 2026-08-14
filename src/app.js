@@ -52,7 +52,7 @@ export function createApp() {
   app.use(express.urlencoded({ extended: true, limit: "100kb" }));
   app.use(morgan(env.nodeEnv === "production" ? "combined" : "dev"));
 
-  app.get("/", (req, res) => res.json({ name: "ZDC API", version: "0.1.0" }));
+  app.get("/", (req, res) => res.json({ name: "zimji API", version: "0.1.0" }));
 
   // Health check is exempt from rate limiting so uptime probes never trip it.
   app.use("/api/health", healthRoutes);

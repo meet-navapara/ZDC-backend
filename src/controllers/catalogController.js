@@ -3,6 +3,12 @@ import { Category, MAX_CATEGORIES_PER_BUSINESS } from "../models/Category.js";
 import { Product, PRODUCT_STATUSES } from "../models/Product.js";
 import { uploadImage } from "../services/storage.js";
 import {
+  cacheAside,
+  invalidateBusinessCatalog,
+  keys,
+  TTL,
+} from "../services/cache.js";
+import {
   boundedText,
   optionalText,
   currencyField,
@@ -21,11 +27,19 @@ const categorySchema = z.object({
 
 export async function listCategories(req, res, next) {
   try {
-    const categories = await Category.find({ business: req.user.sub }).sort({
-      order: 1,
-      createdAt: 1,
-    });
-    return res.json({ categories: categories.map((c) => c.toJSONSafe()) });
+    const businessId = req.user.sub;
+    const categories = await cacheAside(
+      keys.categories(businessId),
+      TTL.categories,
+      async () => {
+        const rows = await Category.find({ business: businessId }).sort({
+          order: 1,
+          createdAt: 1,
+        });
+        return rows.map((c) => c.toJSONSafe());
+      }
+    );
+    return res.json({ categories });
   } catch (err) {
     return next(err);
   }
@@ -46,6 +60,7 @@ export async function createCategory(req, res, next) {
       description: data.description || null,
       order: data.order ?? count,
     });
+    await invalidateBusinessCatalog(req.user.sub);
     return res.status(201).json({ category: category.toJSONSafe() });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -68,6 +83,7 @@ export async function updateCategory(req, res, next) {
     if (data.description !== undefined) category.description = data.description || null;
     if (data.order !== undefined) category.order = data.order;
     await category.save();
+    await invalidateBusinessCatalog(req.user.sub);
     return res.json({ category: category.toJSONSafe() });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -89,6 +105,7 @@ export async function deleteCategory(req, res, next) {
       { business: req.user.sub, category: category._id },
       { $set: { category: null } }
     );
+    await invalidateBusinessCatalog(req.user.sub);
     return res.json({ ok: true });
   } catch (err) {
     return next(err);
@@ -107,13 +124,28 @@ const productSchema = z.object({
   status: z.enum(PRODUCT_STATUSES).optional(),
 });
 
+function productsFilterKey(query) {
+  const cat = query.categoryId || "any";
+  const status = query.status || "any";
+  return `c:${cat}:s:${status}`;
+}
+
 export async function listProducts(req, res, next) {
   try {
-    const filter = { business: req.user.sub };
-    if (req.query.categoryId) filter.category = req.query.categoryId;
-    if (req.query.status) filter.status = req.query.status;
-    const products = await Product.find(filter).sort({ createdAt: -1 });
-    return res.json({ products: products.map((p) => p.toJSONSafe()) });
+    const businessId = req.user.sub;
+    const filterKey = productsFilterKey(req.query);
+    const products = await cacheAside(
+      keys.products(businessId, filterKey),
+      TTL.catalog,
+      async () => {
+        const filter = { business: businessId };
+        if (req.query.categoryId) filter.category = req.query.categoryId;
+        if (req.query.status) filter.status = req.query.status;
+        const rows = await Product.find(filter).sort({ createdAt: -1 });
+        return rows.map((p) => p.toJSONSafe());
+      }
+    );
+    return res.json({ products });
   } catch (err) {
     return next(err);
   }
@@ -173,6 +205,7 @@ export async function createProduct(req, res, next) {
       imageUrls,
       status: data.status || "active",
     });
+    await invalidateBusinessCatalog(req.user.sub);
     return res.status(201).json({ product: product.toJSONSafe() });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -228,6 +261,7 @@ export async function updateProduct(req, res, next) {
     if (newImages.length) product.imageUrls = [...product.imageUrls, ...newImages];
 
     await product.save();
+    await invalidateBusinessCatalog(req.user.sub);
     return res.json({ product: product.toJSONSafe() });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -244,7 +278,133 @@ export async function deleteProduct(req, res, next) {
       business: req.user.sub,
     });
     if (!product) return res.status(404).json({ error: "Product not found" });
+    await invalidateBusinessCatalog(req.user.sub);
     return res.json({ ok: true });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/** Max products accepted in one bulk upload request. */
+export const MAX_BULK_PRODUCTS = 30;
+
+const bulkItemSchema = z.object({
+  name: boundedText(LIMITS.productName, { min: 1 }),
+  sku: optionalText(LIMITS.sku),
+  description: optionalText(LIMITS.description),
+  price: z.coerce.number().min(0).max(MAX_PRICE).optional(),
+  currency: currencyField.optional(),
+  categoryId: objectIdField.optional().or(z.literal("")),
+  status: z.enum(PRODUCT_STATUSES).optional(),
+});
+
+/**
+ * Create many products in one request.
+ * Multipart: `items` = JSON array (same order as `images` files).
+ * Each product gets at most one image from the matching file index.
+ */
+export async function bulkCreateProducts(req, res, next) {
+  try {
+    let rawItems;
+    try {
+      rawItems =
+        typeof req.body.items === "string"
+          ? JSON.parse(req.body.items)
+          : req.body.items;
+    } catch {
+      return res.status(400).json({ error: "Invalid items JSON" });
+    }
+
+    if (!Array.isArray(rawItems) || rawItems.length === 0) {
+      return res.status(400).json({ error: "Provide at least one product in items" });
+    }
+    if (rawItems.length > MAX_BULK_PRODUCTS) {
+      return res.status(400).json({
+        error: `Bulk upload limited to ${MAX_BULK_PRODUCTS} products per batch`,
+      });
+    }
+
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (files.length > rawItems.length) {
+      return res.status(400).json({
+        error: "More images than products — each product takes at most one image",
+      });
+    }
+
+    // Preload owned categories once.
+    const categoryIds = [
+      ...new Set(
+        rawItems
+          .map((it) => (it && typeof it === "object" ? it.categoryId : null))
+          .filter((id) => id && typeof id === "string" && id.length > 0)
+      ),
+    ];
+    const ownedCats = categoryIds.length
+      ? await Category.find({
+          business: req.user.sub,
+          _id: { $in: categoryIds },
+        }).select("_id")
+      : [];
+    const ownedSet = new Set(ownedCats.map((c) => String(c._id)));
+
+    const created = [];
+    const errors = [];
+
+    for (let i = 0; i < rawItems.length; i++) {
+      try {
+        const data = bulkItemSchema.parse(rawItems[i] || {});
+        let categoryId = null;
+        if (data.categoryId) {
+          if (!ownedSet.has(data.categoryId)) {
+            throw new Error("Invalid category");
+          }
+          categoryId = data.categoryId;
+        }
+
+        let imageUrls = [];
+        if (files[i]) {
+          imageUrls = await uploadProductImages([files[i]]);
+        }
+
+        const product = await Product.create({
+          business: req.user.sub,
+          category: categoryId,
+          name: data.name,
+          sku: data.sku || null,
+          description: data.description || null,
+          price: data.price ?? 0,
+          currency: data.currency || "KES",
+          imageUrls,
+          status: data.status || "active",
+        });
+        created.push(product.toJSONSafe());
+      } catch (err) {
+        const message =
+          err instanceof z.ZodError
+            ? err.issues?.[0]?.message || "Validation failed"
+            : err instanceof Error
+              ? err.message
+              : "Failed to create product";
+        errors.push({ index: i, error: message });
+      }
+    }
+
+    if (created.length) {
+      await invalidateBusinessCatalog(req.user.sub);
+    }
+
+    return res.status(created.length ? 201 : 400).json({
+      error: created.length
+        ? undefined
+        : errors[0]?.error || "No products were created",
+      created,
+      errors,
+      summary: {
+        total: rawItems.length,
+        success: created.length,
+        failed: errors.length,
+      },
+    });
   } catch (err) {
     return next(err);
   }

@@ -3,6 +3,7 @@ import { TryonJob } from "../models/TryonJob.js";
 import { Payment } from "../models/Payment.js";
 import { CreditLedger } from "../models/CreditLedger.js";
 import { CreditWallet } from "../models/CreditWallet.js";
+import { cacheAside, keys, TTL } from "./cache.js";
 
 function startOfToday() {
   const d = new Date();
@@ -35,6 +36,12 @@ function fillSeries(rows, days, mapper, zero) {
 
 // Aggregates platform-wide KPIs for the Super Admin analytics console.
 export async function buildPlatformStats({ seriesDays = 30 } = {}) {
+  return cacheAside(keys.platformStats(seriesDays), TTL.stats, () =>
+    buildPlatformStatsUncached({ seriesDays })
+  );
+}
+
+async function buildPlatformStatsUncached({ seriesDays = 30 } = {}) {
   const today = startOfToday();
   const from7 = daysAgo(7);
   const from30 = daysAgo(30);
@@ -159,7 +166,7 @@ export async function buildPlatformStats({ seriesDays = 30 } = {}) {
       {
         $project: {
           _id: 0,
-          userId: "$_id",
+          userId: { $toString: "$_id" },
           tryons: 1,
           completed: 1,
           name: { $ifNull: ["$user.business.name", "$user.email"] },
