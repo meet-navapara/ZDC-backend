@@ -109,9 +109,11 @@ export async function requestB2cSignupOtp(req, res, next) {
 
     return res.json({
       ok: true,
-      message: challenge.mailConfigured
-        ? "Verification code sent to your email."
-        : "Verification code ready (check server logs if email is not configured).",
+      message: challenge.mock
+        ? `Mock OTP ready — use code ${challenge.mockOtp || challenge.devOtp}.`
+        : challenge.mailConfigured
+          ? "Verification code sent to your email."
+          : "Verification code ready (check server logs if email is not configured).",
       ...challenge,
     });
   } catch (err) {
@@ -193,9 +195,11 @@ export async function requestB2bSignupOtp(req, res, next) {
 
     return res.json({
       ok: true,
-      message: challenge.mailConfigured
-        ? "Verification code sent to your email."
-        : "Verification code ready (check server logs if email is not configured).",
+      message: challenge.mock
+        ? `Mock OTP ready — use code ${challenge.mockOtp || challenge.devOtp}.`
+        : challenge.mailConfigured
+          ? "Verification code sent to your email."
+          : "Verification code ready (check server logs if email is not configured).",
       ...challenge,
     });
   } catch (err) {

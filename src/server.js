@@ -20,8 +20,12 @@ async function start() {
     console.log("[redis] REDIS_URL not set — running without cache");
   }
 
-  if (isMailConfigured()) {
+  if (isMailConfigured() && process.env.OTP_MOCK !== "true") {
     console.log("[mail] SMTP configured — signup OTP emails will be sent");
+  } else if ((process.env.OTP_MOCK || "true").toLowerCase() === "true") {
+    console.log(
+      `[otp] MOCK mode ON — emails skipped; use code ${process.env.MOCK_OTP_CODE || "123456"}`
+    );
   } else {
     console.warn(
       "[mail] SMTP not configured — signup OTP codes are logged / returned as devOtp in development"

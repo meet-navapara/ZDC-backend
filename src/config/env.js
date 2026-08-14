@@ -70,4 +70,7 @@ export const env = {
   },
   // Optional. When unset, the API skips Redis and reads from MongoDB only.
   redisUrl: (process.env.REDIS_URL || "").trim(),
+  // When true, signup OTP skips SMTP and always uses MOCK_OTP_CODE (shown in UI).
+  otpMock: (process.env.OTP_MOCK || "true").toLowerCase() === "true",
+  mockOtpCode: (process.env.MOCK_OTP_CODE || "123456").trim() || "123456",
 };
