@@ -24,6 +24,8 @@ const registerSchema = z.object({
 const loginSchema = z.object({
   email: emailField,
   password: loginPasswordField,
+  // Which login screen this request came from. Admins may only use "admin".
+  portal: z.enum(["b2c", "b2b", "admin", "app"]).optional(),
 });
 
 export async function register(req, res, next) {
@@ -71,6 +73,16 @@ export async function login(req, res, next) {
 
     if (user.status === "suspended") {
       return res.status(403).json({ error: "Account suspended" });
+    }
+
+    const portal = data.portal || "app";
+    const allowed =
+      (portal === "admin" && user.role === "admin") ||
+      (portal === "app" && (user.role === "b2c" || user.role === "b2b")) ||
+      (portal === "b2b" && user.role === "b2b") ||
+      (portal === "b2c" && user.role === "b2c");
+    if (!allowed) {
+      return res.status(401).json({ error: "Invalid credentials" });
     }
 
     const token = signToken({ sub: user._id.toString(), role: user.role });
