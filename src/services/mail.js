@@ -27,7 +27,7 @@ export function isMailConfigured() {
 /**
  * Send an email. In development without SMTP, logs to console and resolves.
  */
-export async function sendMail({ to, subject, text, html, attachments }) {
+export async function sendMail({ to, subject, text, html, attachments, replyTo }) {
   const from = env.smtp.from || env.smtp.user || "noreply@zdc.local";
   const tx = getTransporter();
 
@@ -42,6 +42,7 @@ export async function sendMail({ to, subject, text, html, attachments }) {
   await tx.sendMail({
     from,
     to,
+    replyTo,
     subject,
     text,
     html,

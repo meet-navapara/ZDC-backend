@@ -42,6 +42,9 @@ const tryonJobSchema = new Schema(
   { timestamps: true }
 );
 
+// Auto-delete documents 72 hours after creation to manage storage.
+tryonJobSchema.index({ createdAt: 1 }, { expireAfterSeconds: 72 * 60 * 60 });
+
 tryonJobSchema.methods.toJSONSafe = function toJSONSafe() {
   return {
     id: this._id.toString(),

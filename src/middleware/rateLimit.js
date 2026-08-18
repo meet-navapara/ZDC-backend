@@ -20,3 +20,13 @@ export const authLimiter = rateLimit({
     error: "Too many attempts from this device. Please wait a few minutes and try again.",
   },
 });
+
+export const contactLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too many messages from this device. Please wait a few minutes and try again.",
+  },
+});

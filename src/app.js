@@ -13,6 +13,7 @@ import paymentRoutes from "./routes/payments.js";
 import b2bRoutes from "./routes/b2b.js";
 import adminRoutes from "./routes/admin.js";
 import contentRoutes from "./routes/content.js";
+import contactRoutes from "./routes/contact.js";
 import { apiLimiter } from "./middleware/rateLimit.js";
 import { notFound, errorHandler } from "./middleware/error.js";
 
@@ -64,6 +65,7 @@ export function createApp() {
   app.use("/api/b2b", b2bRoutes);
   app.use("/api/admin", adminRoutes);
   app.use("/api/content", contentRoutes);
+  app.use("/api/contact", contactRoutes);
 
   // Sentry must capture route errors before our JSON error responder runs.
   // No-op if Sentry was not initialized (no SENTRY_DSN).

@@ -68,6 +68,8 @@ export const env = {
     pass: process.env.SMTP_PASS || "",
     from: process.env.SMTP_FROM || process.env.SMTP_USER || "",
   },
+  supportEmail:
+    process.env.SUPPORT_EMAIL || "jirani.deal@gmail.com",
   // Optional. When unset, the API skips Redis and reads from MongoDB only.
   redisUrl: (process.env.REDIS_URL || "").trim(),
   // When true, signup OTP skips SMTP and always uses MOCK_OTP_CODE (shown in UI).
