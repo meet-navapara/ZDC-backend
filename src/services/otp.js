@@ -1,8 +1,7 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { EmailOtp } from "../models/EmailOtp.js";
-// Real email delivery — disabled while OTP_MOCK=true
-// import { sendSignupOtpEmail } from "./mail.js";
+import { sendSignupOtpEmail } from "./mail.js";
 import { env } from "../config/env.js";
 
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -33,11 +32,9 @@ export async function issueSignupOtp({ email, purpose, payload }) {
     attempts: 0,
   });
 
-  // --- Real SMTP OTP (commented out while mock is on) ---
-  // if (!env.otpMock) {
-  //   await sendSignupOtpEmail(email, code);
-  // }
-  if (env.otpMock) {
+  if (!env.otpMock) {
+    await sendSignupOtpEmail(email, code);
+  } else {
     console.log(`[otp] MOCK mode — code for ${email}: ${code}`);
   }
 
@@ -45,18 +42,14 @@ export async function issueSignupOtp({ email, purpose, payload }) {
     email,
     purpose,
     expiresInSeconds: Math.floor(OTP_TTL_MS / 1000),
-    mailConfigured: false,
+    mailConfigured: Boolean(env.smtp.host && env.smtp.user && env.smtp.pass),
     mock: env.otpMock,
   };
 
-  // Always expose the code in mock mode so the UI can show / auto-fill it.
   if (env.otpMock) {
     result.devOtp = code;
     result.mockOtp = code;
   }
-  // else if (!env.isProd && !(env.smtp.host && env.smtp.user && env.smtp.pass)) {
-  //   result.devOtp = code;
-  // }
 
   return result;
 }
