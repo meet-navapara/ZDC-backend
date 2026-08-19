@@ -21,7 +21,5 @@ if (dsn) {
     // and contact details, so we send only explicit, non-PII context.
     sendDefaultPii: false,
   });
-  console.log("[sentry] enabled");
 } else {
-  console.log("[sentry] disabled (set SENTRY_DSN to enable)");
 }

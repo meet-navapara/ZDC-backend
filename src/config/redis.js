@@ -28,19 +28,10 @@ export function getRedis() {
       },
     });
 
-    client.on("connect", () => {
-      console.log("[redis] connected");
-    });
-    client.on("ready", () => {
-      console.log("[redis] ready");
-    });
     client.on("error", (err) => {
-      // Avoid crashing the process on transient Redis errors.
-      console.warn("[redis]", err.message);
+      // Suppress transient Redis errors silently — Mongo remains source of truth.
     });
-    client.on("end", () => {
-      console.warn("[redis] connection closed");
-    });
+    client.on("end", () => {});
   } catch (err) {
     console.warn(
       "[redis] failed to initialize:",

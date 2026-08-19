@@ -6,16 +6,16 @@ const { Schema } = mongoose;
 // the site looks identical until an operator edits it from the admin panel.
 export const DEFAULT_CONTENT = {
   hero: {
-    badge: "AI Virtual Try-On • Built for Africa",
-    titleLine1: "Wear the",
-    titleHighlight: "Future.",
-    titleLine2: "Now.",
+    badge: "Hair & Apparel Virtual Try-On • Built for You",
+    titleLine1: "Hair & Apparel,",
+    titleHighlight: "Try-On",
+    titleLine2: "in Seconds.",
     subtitle:
-      "Visualize any outfit or hairstyle on yourself before you spend a shilling. Photorealistic try-ons, delivered in seconds.",
+      "No guesswork, no regrets — just instant results. See exactly how any outfit or hairstyle looks on you before you buy or book.",
     primaryCta: "Try On Instantly",
     stats: [
       { value: "~8s", label: "Render time" },
-      { value: "WhatsApp", label: "Instant delivery" },
+      { value: "Hair & Apparel", label: "Categories" },
       { value: "M-Pesa", label: "Easy payments" },
     ],
   },
@@ -87,3 +87,51 @@ siteContentSchema.methods.toJSONSafe = function toJSONSafe() {
 };
 
 export const SiteContent = mongoose.model("SiteContent", siteContentSchema);
+
+/**
+ * Patches stale default-content values in the DB on every server startup.
+ * Uses $set with exact old-value matching so admin edits are never overwritten.
+ * Add new entries here whenever a default copy changes.
+ */
+export async function migrateSiteContent() {
+  const stalePatches = [
+    // old value → field path → new value
+    {
+      match: { "hero.badge": "AI Virtual Try-On • Built for Africa" },
+      patch: { "hero.badge": DEFAULT_CONTENT.hero.badge },
+      label: "hero.badge africa→you",
+    },
+    {
+      match: { "hero.badge": "AI Virtual Try-On • Built for You" },
+      patch: { "hero.badge": DEFAULT_CONTENT.hero.badge },
+      label: "hero.badge you→hair&apparel",
+    },
+    {
+      match: { "hero.titleLine1": "Wear the" },
+      patch: {
+        "hero.titleLine1": DEFAULT_CONTENT.hero.titleLine1,
+        "hero.titleHighlight": DEFAULT_CONTENT.hero.titleHighlight,
+        "hero.titleLine2": DEFAULT_CONTENT.hero.titleLine2,
+        "hero.subtitle": DEFAULT_CONTENT.hero.subtitle,
+      },
+      label: "hero title/subtitle→hair&apparel punchline",
+    },
+    {
+      match: { "hero.titleLine1": "Try it in seconds —" },
+      patch: {
+        "hero.titleLine1": DEFAULT_CONTENT.hero.titleLine1,
+        "hero.titleHighlight": DEFAULT_CONTENT.hero.titleHighlight,
+        "hero.titleLine2": DEFAULT_CONTENT.hero.titleLine2,
+        "hero.subtitle": DEFAULT_CONTENT.hero.subtitle,
+      },
+      label: "hero title/subtitle→hair&apparel clean",
+    },
+  ];
+
+  for (const { match, patch, label } of stalePatches) {
+    await SiteContent.updateOne(
+      { key: "default", ...match },
+      { $set: patch }
+    );
+  }
+}

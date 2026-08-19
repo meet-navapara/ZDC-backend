@@ -33,14 +33,9 @@ export async function connectDB() {
     await mongoose.connect(env.mongoUri, {
       serverSelectionTimeoutMS: 10000,
     });
-    console.log("[db] MongoDB connected");
   } catch (err) {
     console.error("[db] MongoDB connection error:", err.message);
     printAtlasHelp(err);
     throw err;
   }
-
-  mongoose.connection.on("disconnected", () => {
-    console.warn("[db] MongoDB disconnected");
-  });
 }

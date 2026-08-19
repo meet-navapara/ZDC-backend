@@ -45,12 +45,8 @@ export async function repairPaymentInvoiceIndex() {
     { $or: [{ providerInvoiceId: null }, { providerInvoiceId: "" }] },
     { $unset: { providerInvoiceId: "" } }
   );
-  if (cleared.modifiedCount) {
-    console.log(`[db] unset empty providerInvoiceId on ${cleared.modifiedCount} payment(s)`);
-  }
   try {
     await col.dropIndex("providerInvoiceId_1");
-    console.log("[db] dropped unique sparse index providerInvoiceId_1");
   } catch (err) {
     if (err?.code !== 27 && err?.codeName !== "IndexNotFound") {
       console.warn("[db] dropIndex providerInvoiceId_1:", err.message);

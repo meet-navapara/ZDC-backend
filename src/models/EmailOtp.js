@@ -21,7 +21,7 @@ const emailOtpSchema = new Schema(
     codeHash: { type: String, required: true },
     // Serialized signup fields (password already hashed).
     payload: { type: Schema.Types.Mixed, required: true },
-    expiresAt: { type: Date, required: true, index: true },
+    expiresAt: { type: Date, required: true },
     attempts: { type: Number, default: 0 },
   },
   { timestamps: true }

@@ -32,10 +32,6 @@ export async function sendMail({ to, subject, text, html, attachments, replyTo }
   const tx = getTransporter();
 
   if (!tx) {
-    console.log("[mail] SMTP not configured — email not sent.");
-    console.log(`[mail] To: ${to}`);
-    console.log(`[mail] Subject: ${subject}`);
-    console.log(`[mail] Body:\n${text || html || ""}`);
     return { queued: false, logged: true };
   }
 

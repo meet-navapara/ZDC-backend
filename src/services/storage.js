@@ -31,7 +31,6 @@ if (cloudinaryEnabled) {
     // CLOUDINARY_URL is read automatically by the SDK
     cloudinary.config({ secure: true });
   }
-  console.log("[storage] Cloudinary enabled");
 } else {
   console.warn(
     "[storage] Cloudinary not configured — using LOCAL disk fallback (dev only). Set CLOUDINARY_URL to enable cloud storage."

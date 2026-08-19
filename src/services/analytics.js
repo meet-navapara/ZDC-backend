@@ -11,9 +11,7 @@ let client = null;
 
 if (apiKey) {
   client = new PostHog(apiKey, { host, flushAt: 1, flushInterval: 5000 });
-  console.log("[analytics] PostHog enabled");
 } else {
-  console.log("[analytics] PostHog disabled (set POSTHOG_API_KEY to enable)");
 }
 
 export function capture(distinctId, event, properties = {}) {
