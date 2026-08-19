@@ -5,11 +5,17 @@ import { getRedis, closeRedis, isRedisEnabled } from "./config/redis.js";
 import { shutdownAnalytics } from "./services/analytics.js";
 import { isMailConfigured } from "./services/mail.js";
 import { repairPaymentInvoiceIndex } from "./models/Payment.js";
+import { isIntasendConfigured } from "./services/intasend/client.js";
 
 async function start() {
   try {
     await connectDB();
     await repairPaymentInvoiceIndex();
+    if (isIntasendConfigured() && !env.intasend.enabled) {
+      console.log(
+        "[payments] IntaSend keys found but checkout disabled — using demo (stub) gateway. Set INTASEND_ENABLED=true to test IntaSend."
+      );
+    }
   } catch (err) {
     console.error("[server] Failed to start database:", err?.message || err);
     process.exit(1);

@@ -26,11 +26,16 @@ export const CHECKOUT_REUSE_MS = 25 * 60 * 1000;
 
 export { isIntasendConfigured };
 
+/** Keys present and IntaSend allowed for checkout (off by default in dev). */
+export function isIntasendEnabled() {
+  return isIntasendConfigured() && env.intasend.enabled;
+}
+
 export function resolveGateway(requested) {
   const req = requested || null;
   if (req === "referral") return "referral";
 
-  const intasendOn = isIntasendConfigured();
+  const intasendOn = isIntasendEnabled();
   if (env.isProd && intasendOn) {
     if (req && req !== "intasend") {
       const err = new Error("This server only accepts IntaSend for paid orders.");
@@ -42,11 +47,18 @@ export function resolveGateway(requested) {
   }
 
   if (req === "intasend") {
-    if (!intasendOn) {
+    if (!isIntasendConfigured()) {
       const err = new Error("IntaSend is not configured");
       err.status = 503;
       err.publicMessage =
         "IntaSend is not configured. Add INTASEND_PUBLIC_KEY and INTASEND_SECRET_KEY.";
+      throw err;
+    }
+    if (!intasendOn) {
+      const err = new Error("IntaSend is disabled in this environment");
+      err.status = 503;
+      err.publicMessage =
+        "IntaSend checkout is off locally. Pay with demo mode (instant), or set INTASEND_ENABLED=true with an HTTPS FRONTEND_URL.";
       throw err;
     }
     return "intasend";
@@ -69,18 +81,26 @@ export function getPaymentProvider(gateway = "stub") {
 }
 
 export function publicPaymentMethods() {
-  const intasendOn = isIntasendConfigured();
+  const configured = isIntasendConfigured();
+  const enabled = isIntasendEnabled();
   const methods = [];
-  if (intasendOn) {
+  if (enabled) {
     methods.push({ id: "intasend", label: "IntaSend", available: true });
   }
-  if (!env.isProd || !intasendOn) {
-    methods.push({ id: "stub", label: "Demo (no charge)", available: true });
+  if (!env.isProd || !enabled) {
+    methods.push({ id: "stub", label: "Demo (instant, no charge)", available: true });
   }
   return {
-    defaultGateway: intasendOn ? "intasend" : "stub",
-    intasendConfigured: intasendOn,
-    sandbox: intasendOn && env.intasend.environment !== "live",
+    defaultGateway: enabled ? "intasend" : "stub",
+    intasendConfigured: configured,
+    intasendEnabled: enabled,
+    sandbox: configured && env.intasend.environment !== "live",
+    intasendCheckoutMethod: enabled ? env.intasend.checkoutMethod || null : null,
+    paymentNotice: enabled
+      ? null
+      : configured && !env.isProd
+        ? "Demo payment is active. IntaSend M-Pesa needs a Kenya Safaricom line; card sandbox often hangs. Set INTASEND_ENABLED=true only when testing from Kenya or with a working sandbox setup."
+        : null,
     methods,
   };
 }

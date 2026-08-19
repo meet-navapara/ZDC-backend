@@ -6,9 +6,15 @@ import { verifyWebhookChallenge } from "./webhookAuth.js";
 import { applyVerifiedPayment } from "../paymentFulfillment.js";
 
 export async function syncIntasendPayment(payment, extraIds = {}) {
-  const invoiceId =
-    extraIds.invoiceId || payment.providerInvoiceId || payment.reference;
+  // IntaSend checkout can be created before it has an invoice_id.
+  // When invoice_id is missing, we must poll using checkout_id only,
+  // otherwise status can stay stuck at PENDING/PROCESSING forever.
   const checkoutId = extraIds.checkoutId || payment.providerCheckoutId;
+  const invoiceId =
+    extraIds.invoiceId ||
+    payment.providerInvoiceId ||
+    // Only fall back to `reference` when we don't have checkout_id.
+    (!checkoutId ? payment.reference : undefined);
   if (!invoiceId && !checkoutId) {
     const err = new Error("Payment has no IntaSend invoice id");
     err.status = 409;

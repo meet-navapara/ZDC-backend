@@ -62,6 +62,13 @@ export async function createCheckoutSession({
   host,
 }) {
   const country = checkoutCountryForCurrency(currency);
+  // Sandbox M-Pesa: always use the official sandbox test number.
+  // This avoids "Failed to initiate transaction" when the user's profile phone
+  // is not STK/M-Pesa enabled.
+  const phoneForCheckout =
+    env.intasend.environment !== "live" && env.intasend.checkoutMethod === "M-PESA"
+      ? env.intasend.mockMpesaPhone
+      : checkoutPhoneForCountry(phone, country);
   const payload = {
     amount: Number(amount).toFixed(2),
     currency: String(currency).toUpperCase(),
@@ -72,11 +79,14 @@ export async function createCheckoutSession({
     email: email || undefined,
     first_name: sanitizeIntasendText(firstName) || undefined,
     last_name: sanitizeIntasendText(lastName) || undefined,
-    phone_number: checkoutPhoneForCountry(phone, country),
+    phone_number: phoneForCheckout,
     country,
     ...billingFieldsForCountry(country),
     comment: sanitizeIntasendText(comment, 140) || undefined,
   };
+  if (env.intasend.checkoutMethod) {
+    payload.method = env.intasend.checkoutMethod;
+  }
 
   const httpsRedirect = String(payload.redirect_url || "").startsWith("https://");
   console.log("[intasend] checkout_create", {
@@ -84,6 +94,8 @@ export async function createCheckoutSession({
     amount: payload.amount,
     currency: payload.currency,
     country: payload.country,
+    method: payload.method || "all",
+    host: payload.host,
     httpsRedirect,
   });
   if (!httpsRedirect) {
@@ -130,14 +142,20 @@ export async function createCheckoutSession({
  * @see https://developers.intasend.com/reference/api_v1_payment_status_create
  */
 export async function getPaymentStatus({ invoiceId, checkoutId }) {
-  const invoice_id = invoiceId || checkoutId;
-  if (!invoice_id) {
-    const err = new Error("Missing IntaSend invoice id");
+  // IntaSend supports checking by `invoice_id` OR `checkout_id`.
+  // When checkout is created, `invoice_id` can be null; in that case we must
+  // query using `checkout_id` only, otherwise status stays stuck.
+  const body = {};
+  if (invoiceId) {
+    body.invoice_id = invoiceId;
+    if (checkoutId) body.checkout_id = checkoutId;
+  } else if (checkoutId) {
+    body.checkout_id = checkoutId;
+  } else {
+    const err = new Error("Missing IntaSend invoice id / checkout id");
     err.status = 400;
     throw err;
   }
-  const body = { invoice_id };
-  if (checkoutId) body.checkout_id = checkoutId;
   const data = await intasendRequest("POST", "/api/v1/payment/status/", body, {
     auth: "secret",
   });
