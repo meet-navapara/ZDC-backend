@@ -239,7 +239,8 @@ export async function getPayment(req, res, next) {
     if (payment.gateway === "intasend" && payment.status === "pending") {
       try {
         const invoiceId = req.query.invoice_id || undefined;
-        const synced = await syncIntasendPayment(payment, { invoiceId });
+        const checkoutId = req.query.checkout_id || undefined;
+        const synced = await syncIntasendPayment(payment, { invoiceId, checkoutId });
         return res.json({ payment: serializePayment(synced) });
       } catch (err) {
         console.error("[intasend] status_poll_failed", {
