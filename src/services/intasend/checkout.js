@@ -1,6 +1,6 @@
 import { env } from "../../config/env.js";
 import { intasendRequest, isIntasendConfigured } from "./client.js";
-import { invoiceFromStatus, mapIntasendState, sanitizeIntasendText, sanitizePhone } from "./status.js";
+import { invoiceFromStatus, isDeadCardPending, mapIntasendState, sanitizeIntasendText, sanitizePhone } from "./status.js";
 
 export { isIntasendConfigured };
 
@@ -160,8 +160,9 @@ export async function getPaymentStatus({ invoiceId, checkoutId }) {
     auth: "secret",
   });
   const parsed = invoiceFromStatus(data);
+  const deadCard = isDeadCardPending(parsed);
   return {
-    status: mapIntasendState(parsed.state),
+    status: deadCard ? "failed" : mapIntasendState(parsed.state),
     providerState: parsed.state,
     amount: parsed.amount,
     currency: parsed.currency,
@@ -169,7 +170,10 @@ export async function getPaymentStatus({ invoiceId, checkoutId }) {
     providerCheckoutId: parsed.checkoutId || checkoutId || null,
     apiRef: parsed.apiRef,
     method: parsed.provider,
-    failedReason: parsed.failedReason,
+    failedReason: deadCard
+      ? "Card 3DS authentication did not complete. Use M-Pesa (254708374149) for sandbox testing, or try a real card in live mode."
+      : parsed.failedReason,
+    _parsed: parsed,
   };
 }
 

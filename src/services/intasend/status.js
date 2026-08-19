@@ -57,7 +57,24 @@ export function invoiceFromStatus(data) {
     currency: invoice.currency || data?.currency || null,
     apiRef: invoice.api_ref || data?.api_ref || null,
     provider: invoice.provider || data?.provider || null,
+    providerRef: invoice.provider_ref || data?.provider_ref || null,
     failedReason: invoice.failed_reason || data?.failed_reason || null,
+    failedCode: invoice.failed_code || data?.failed_code || null,
+    retryCount: invoice.retry_count ?? data?.retry_count ?? null,
     checkoutId: data?.meta?.id || null,
   };
+}
+
+/**
+ * IntaSend sandbox card 3DS never completes — invoice stays PENDING with
+ * provider_ref: null and retry_count: 0. Detect this "dead" state so we
+ * can surface a real error instead of polling forever.
+ */
+export function isDeadCardPending(parsed) {
+  if (String(parsed.state || "").toUpperCase() !== "PENDING") return false;
+  const provider = String(parsed.provider || "").toUpperCase();
+  if (!provider.includes("CARD")) return false;
+  // provider_ref is set once the card processor responds; null means 3DS stalled
+  if (parsed.providerRef !== null && parsed.providerRef !== undefined) return false;
+  return true;
 }
