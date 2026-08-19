@@ -4,12 +4,14 @@ import { env } from "./config/env.js";
 import { getRedis, closeRedis, isRedisEnabled } from "./config/redis.js";
 import { shutdownAnalytics } from "./services/analytics.js";
 import { isMailConfigured } from "./services/mail.js";
+import { repairPaymentInvoiceIndex } from "./models/Payment.js";
 
 async function start() {
   try {
     await connectDB();
-  } catch {
-    console.error("[server] Failed to connect to MongoDB. Exiting.");
+    await repairPaymentInvoiceIndex();
+  } catch (err) {
+    console.error("[server] Failed to start database:", err?.message || err);
     process.exit(1);
   }
 

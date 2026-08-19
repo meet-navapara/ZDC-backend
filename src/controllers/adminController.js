@@ -12,6 +12,7 @@ import { getPricingSafe, updatePricing } from "../services/pricing.js";
 import { getContentSafe, updateContent } from "../services/siteContent.js";
 import { buildPlatformStats } from "../services/platformStats.js";
 import { recordAudit } from "../services/audit.js";
+import { refundPayment as refundIntasendPayment } from "../services/intasend/checkout.js";
 import { AuditLog, AUDIT_ACTIONS } from "../models/AuditLog.js";
 import {
   passwordField,
@@ -21,6 +22,7 @@ import {
   LIMITS,
   MAX_PRICE,
   MAX_CREDITS,
+  objectIdField,
 } from "../utils/validators.js";
 
 function startOfToday() {
@@ -236,7 +238,7 @@ export async function listAudit(req, res, next) {
 /* ------------------------------- Payments -------------------------------- */
 
 const PAYMENT_PURPOSES = ["b2c_tryon", "b2b_credits"];
-const PAYMENT_GATEWAYS = ["stub", "mpesa", "intasend"];
+const PAYMENT_GATEWAYS = ["stub", "mpesa", "intasend", "referral"];
 
 // Paginated, filterable payment ledger with a summary for the current filter.
 // Powers the Super Admin "Payment monitoring" view. Data comes straight from
@@ -298,6 +300,8 @@ export async function listPayments(req, res, next) {
       paid: { count: 0, amount: 0 },
       pending: { count: 0, amount: 0 },
       failed: { count: 0, amount: 0 },
+      cancelled: { count: 0, amount: 0 },
+      refunded: { count: 0, amount: 0 },
     };
     for (const row of summaryRows) {
       if (summary[row._id]) {
@@ -336,6 +340,54 @@ export async function listPayments(req, res, next) {
       pages: Math.ceil(total / limit),
     });
   } catch (err) {
+    return next(err);
+  }
+}
+
+export async function refundPayment(req, res, next) {
+  try {
+    const id = objectIdField.parse(req.params.id);
+    const payment = await Payment.findById(id);
+    if (!payment) {
+      return res.status(404).json({ error: "Payment not found" });
+    }
+    if (payment.status === "refunded") {
+      return res.json({ payment: { id: String(payment._id), status: payment.status } });
+    }
+    if (payment.status !== "paid") {
+      return res.status(409).json({ error: "Only paid payments can be refunded" });
+    }
+    if (payment.gateway !== "intasend") {
+      return res.status(400).json({ error: "Refunds via API are only supported for IntaSend" });
+    }
+    const invoiceId = payment.providerInvoiceId || payment.reference;
+    if (!invoiceId) {
+      return res.status(409).json({ error: "Missing IntaSend invoice id" });
+    }
+    await refundIntasendPayment({
+      invoiceId,
+      amount: payment.amount,
+      reason: "Admin refund",
+    });
+    payment.status = "refunded";
+    payment.meta = {
+      ...(payment.meta && typeof payment.meta === "object" ? payment.meta : {}),
+      refundedAt: new Date().toISOString(),
+    };
+    await payment.save();
+    return res.json({
+      payment: {
+        id: String(payment._id),
+        status: payment.status,
+        gateway: payment.gateway,
+        amount: payment.amount,
+        currency: payment.currency,
+      },
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ error: "Validation failed", details: err.issues });
+    }
     return next(err);
   }
 }

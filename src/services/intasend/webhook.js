@@ -1,0 +1,90 @@
+import mongoose from "mongoose";
+import { Payment } from "../../models/Payment.js";
+import { amountsMatch } from "./status.js";
+import { verifyPayment } from "./checkout.js";
+import { verifyWebhookChallenge } from "./webhookAuth.js";
+import { applyVerifiedPayment } from "../paymentFulfillment.js";
+
+export async function syncIntasendPayment(payment, extraIds = {}) {
+  const invoiceId =
+    extraIds.invoiceId || payment.providerInvoiceId || payment.reference;
+  const checkoutId = extraIds.checkoutId || payment.providerCheckoutId;
+  if (!invoiceId && !checkoutId) {
+    const err = new Error("Payment has no IntaSend invoice id");
+    err.status = 409;
+    err.publicMessage = "This payment is not an IntaSend checkout.";
+    throw err;
+  }
+
+  const verified = await verifyPayment({ invoiceId, checkoutId });
+
+  if (verified.status === "paid") {
+    if (
+      verified.amount != null &&
+      verified.currency &&
+      !amountsMatch(payment.amount, payment.currency, verified.amount, verified.currency)
+    ) {
+      console.error("[intasend] amount_mismatch", {
+        paymentId: String(payment._id),
+        expectedAmount: payment.amount,
+        expectedCurrency: payment.currency,
+        actualAmount: verified.amount,
+        actualCurrency: verified.currency,
+      });
+      const err = new Error("IntaSend amount/currency does not match the order");
+      err.status = 409;
+      err.publicMessage = "Payment amount did not match the order. Not marked paid.";
+      throw err;
+    }
+  }
+
+  const updated = await applyVerifiedPayment(payment, verified);
+  console.log("[intasend] status_sync", {
+    paymentId: String(payment._id),
+    from: payment.status,
+    to: updated.status,
+    providerState: verified.providerState,
+  });
+  return updated;
+}
+
+export async function handleIntasendWebhook(req) {
+  const body = req.body || {};
+  const auth = verifyWebhookChallenge(body.challenge);
+  if (!auth.ok) {
+    console.log("[intasend] webhook_rejected", { reason: auth.reason });
+    const err = new Error("Invalid IntaSend webhook");
+    err.status = 401;
+    err.publicMessage = "Invalid webhook.";
+    throw err;
+  }
+
+  console.log("[intasend] webhook_received", {
+    invoiceId: body.invoice_id || null,
+    apiRef: body.api_ref || null,
+    state: body.state || null,
+  });
+
+  let payment = null;
+  if (body.invoice_id) {
+    payment = await Payment.findOne({
+      gateway: "intasend",
+      providerInvoiceId: body.invoice_id,
+    });
+  }
+  if (!payment && body.api_ref && mongoose.isValidObjectId(body.api_ref)) {
+    payment = await Payment.findOne({ _id: body.api_ref, gateway: "intasend" });
+  }
+  if (!payment) {
+    console.log("[intasend] webhook_unknown_payment", {
+      invoiceId: body.invoice_id || null,
+      apiRef: body.api_ref || null,
+    });
+    return { ok: true, ignored: true };
+  }
+
+  const updated = await syncIntasendPayment(payment, {
+    invoiceId: body.invoice_id,
+  });
+  return { ok: true, paymentId: String(updated._id), status: updated.status };
+}

@@ -12,6 +12,7 @@ import {
   getAnalytics,
   listAudit,
   listPayments,
+  refundPayment,
   listCatalog,
   getContent,
   setContent,
@@ -26,6 +27,7 @@ router.get("/overview", ...admin, getOverview);
 router.get("/analytics", ...admin, getAnalytics);
 router.get("/audit", ...admin, listAudit);
 router.get("/payments", ...admin, listPayments);
+router.post("/payments/:id/refund", ...admin, refundPayment);
 router.get("/catalog", ...admin, listCatalog);
 
 // Pricing control

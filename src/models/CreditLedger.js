@@ -25,6 +25,8 @@ const creditLedgerSchema = new Schema(
   { timestamps: true }
 );
 
+creditLedgerSchema.index({ payment: 1 }, { unique: true, sparse: true });
+
 creditLedgerSchema.methods.toJSONSafe = function toJSONSafe() {
   return {
     id: this._id.toString(),

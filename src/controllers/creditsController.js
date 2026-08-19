@@ -1,11 +1,16 @@
 import { z } from "zod";
 import { getCreditPacks, getCreditPack } from "../services/pricing.js";
 import { Payment } from "../models/Payment.js";
-import { getPaymentProvider } from "../services/payments.js";
+import { getPaymentProvider, resolveGateway, CHECKOUT_REUSE_MS } from "../services/payments.js";
 import { addCredits, getBalance, listLedger } from "../services/credits.js";
 import { capture } from "../services/analytics.js";
 import { buildCreditInvoicePdf, invoiceContextForPayment } from "../services/invoice.js";
 import { objectIdField, slugField } from "../utils/validators.js";
+import {
+  serializePayment,
+  customerForUser,
+  startIntasendCheckout,
+} from "./paymentsController.js";
 
 export async function listCreditPacks(req, res, next) {
   try {
@@ -48,7 +53,64 @@ export async function purchaseCredits(req, res, next) {
       return res.status(400).json({ error: "Invalid credit pack" });
     }
 
-    const provider = getPaymentProvider();
+    const gateway = resolveGateway(data.gateway);
+    const packMeta = {
+      packId: pack.id,
+      packLabel: pack.label,
+      credits: pack.credits,
+    };
+
+    if (gateway === "intasend") {
+      const reuseAfter = new Date(Date.now() - CHECKOUT_REUSE_MS);
+      const existing = await Payment.findOne({
+        user: req.user.sub,
+        purpose: "b2b_credits",
+        gateway: "intasend",
+        status: "pending",
+        createdAt: { $gte: reuseAfter },
+        checkoutUrl: { $ne: null },
+        "meta.packId": pack.id,
+      }).sort({ createdAt: -1 });
+      if (existing) {
+        return res.json({
+          payment: serializePayment(existing),
+          checkoutUrl: existing.checkoutUrl,
+          credited: 0,
+          balance: await getBalance(req.user.sub),
+        });
+      }
+
+      let payment = await Payment.create({
+        user: req.user.sub,
+        gateway: "intasend",
+        amount: pack.amount,
+        currency: pack.currency,
+        purpose: "b2b_credits",
+        status: "pending",
+        meta: packMeta,
+      });
+      try {
+        payment = await startIntasendCheckout(
+          payment,
+          await customerForUser(req.user.sub),
+          `zimji ${pack.label} credits`
+        );
+      } catch (err) {
+        payment.status = "failed";
+        payment.failureReason = err.publicMessage || err.message;
+        await payment.save().catch(() => {});
+        throw err;
+      }
+
+      return res.json({
+        payment: serializePayment(payment),
+        checkoutUrl: payment.checkoutUrl,
+        credited: 0,
+        balance: await getBalance(req.user.sub),
+      });
+    }
+
+    const provider = getPaymentProvider(gateway);
     const charge = await provider.createCharge({
       amount: pack.amount,
       currency: pack.currency,
@@ -57,21 +119,20 @@ export async function purchaseCredits(req, res, next) {
 
     const payment = await Payment.create({
       user: req.user.sub,
-      gateway: data.gateway || charge.gateway,
+      gateway: charge.gateway,
       amount: pack.amount,
       currency: pack.currency,
       purpose: "b2b_credits",
       status: charge.status,
       reference: charge.reference,
-      meta: {
-        packId: pack.id,
-        packLabel: pack.label,
-        credits: pack.credits,
-      },
+      meta: packMeta,
     });
 
     if (charge.status !== "paid") {
-      return res.status(402).json({ error: "Payment not completed", payment });
+      return res.status(402).json({
+        error: "Payment not completed",
+        payment: serializePayment(payment),
+      });
     }
 
     const balance = await addCredits(req.user.sub, pack.credits, {
@@ -93,14 +154,7 @@ export async function purchaseCredits(req, res, next) {
     return res.json({
       balance,
       credited: pack.credits,
-      payment: {
-        id: paymentId,
-        status: payment.status,
-        reference: payment.reference,
-        amount: payment.amount,
-        currency: payment.currency,
-      },
-      // Frontend uses this to auto-download the PDF invoice.
+      payment: serializePayment(payment),
       invoiceUrl: `/api/b2b/credits/payments/${paymentId}/invoice.pdf`,
     });
   } catch (err) {

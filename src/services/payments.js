@@ -1,9 +1,10 @@
 // Payment provider interface.
 //
-// The gateway (M-Pesa Daraja / Intasend) is not finalized yet, so a stub
-// provider marks charges as paid immediately. This keeps the checkout flow
-// working end-to-end. Replace StubProvider with MpesaProvider / IntasendProvider
-// (same interface) once the gateway and credentials are chosen.
+// Stub marks charges paid immediately (local demo).
+// IntaSend Checkout creates a hosted payment link and returns pending + checkoutUrl.
+
+import { env } from "../config/env.js";
+import { isIntasendConfigured, createCheckoutSession } from "./intasend/checkout.js";
 
 class StubProvider {
   constructor() {
@@ -21,13 +22,65 @@ class StubProvider {
   }
 }
 
-let provider;
+export const CHECKOUT_REUSE_MS = 25 * 60 * 1000;
 
-export function getPaymentProvider() {
-  if (!provider) {
-    // if (process.env.MPESA_CONSUMER_KEY) provider = new MpesaProvider();
-    // else if (process.env.INTASEND_API_KEY) provider = new IntasendProvider();
-    provider = new StubProvider();
+export { isIntasendConfigured };
+
+export function resolveGateway(requested) {
+  const req = requested || null;
+  if (req === "referral") return "referral";
+
+  const intasendOn = isIntasendConfigured();
+  if (env.isProd && intasendOn) {
+    if (req && req !== "intasend") {
+      const err = new Error("This server only accepts IntaSend for paid orders.");
+      err.status = 400;
+      err.publicMessage = err.message;
+      throw err;
+    }
+    return "intasend";
   }
-  return provider;
+
+  if (req === "intasend") {
+    if (!intasendOn) {
+      const err = new Error("IntaSend is not configured");
+      err.status = 503;
+      err.publicMessage =
+        "IntaSend is not configured. Add INTASEND_PUBLIC_KEY and INTASEND_SECRET_KEY.";
+      throw err;
+    }
+    return "intasend";
+  }
+
+  if (!req && intasendOn) return "intasend";
+  return "stub";
+}
+
+export function getPaymentProvider(gateway = "stub") {
+  if (gateway === "intasend") {
+    return {
+      name: "intasend",
+      async createCharge(params) {
+        return createCheckoutSession(params);
+      },
+    };
+  }
+  return new StubProvider();
+}
+
+export function publicPaymentMethods() {
+  const intasendOn = isIntasendConfigured();
+  const methods = [];
+  if (intasendOn) {
+    methods.push({ id: "intasend", label: "IntaSend", available: true });
+  }
+  if (!env.isProd || !intasendOn) {
+    methods.push({ id: "stub", label: "Demo (no charge)", available: true });
+  }
+  return {
+    defaultGateway: intasendOn ? "intasend" : "stub",
+    intasendConfigured: intasendOn,
+    sandbox: intasendOn && env.intasend.environment !== "live",
+    methods,
+  };
 }

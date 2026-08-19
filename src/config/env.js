@@ -43,6 +43,37 @@ function parseTrustProxy() {
   return Number.isNaN(n) ? raw : n;
 }
 
+function intasendConfig() {
+  const raw = (process.env.INTASEND_ENVIRONMENT || "").trim().toLowerCase();
+  const testFlag = (process.env.INTASEND_TEST || "").toLowerCase() === "true";
+  const publicKey =
+    (process.env.INTASEND_PUBLIC_KEY || process.env.INTASEND_API_KEY || "").trim();
+  const secretKey = (process.env.INTASEND_SECRET_KEY || "").trim();
+  const isTestKey = /test/i.test(publicKey) || /test/i.test(secretKey);
+  const environment =
+    raw === "live" || raw === "production"
+      ? "live"
+      : raw === "sandbox" || raw === "test" || testFlag || isTestKey || !raw
+        ? "sandbox"
+        : "sandbox";
+  const live = environment === "live" && !isTestKey;
+  return {
+    environment: live ? "live" : "sandbox",
+    publicKey,
+    secretKey,
+    webhookChallenge: (process.env.INTASEND_WEBHOOK_CHALLENGE || "").trim(),
+    country: (process.env.INTASEND_COUNTRY || "KE").trim().toUpperCase().slice(0, 2),
+    apiBase: (
+      process.env.INTASEND_API_BASE ||
+      (live ? "https://payment.intasend.com" : "https://sandbox.intasend.com")
+    ).replace(/\/$/, ""),
+    timeoutMs: Math.min(
+      60000,
+      Math.max(5000, parseInt(process.env.INTASEND_TIMEOUT_MS || "20000", 10) || 20000)
+    ),
+  };
+}
+
 export const env = {
   nodeEnv,
   isProd,
@@ -75,4 +106,8 @@ export const env = {
   // When true, signup OTP skips SMTP and always uses MOCK_OTP_CODE (shown in UI).
   otpMock: (process.env.OTP_MOCK || "true").toLowerCase() === "true",
   mockOtpCode: (process.env.MOCK_OTP_CODE || "123456").trim() || "123456",
+  frontendUrl:
+    (process.env.FRONTEND_URL || "").trim() ||
+    (process.env.CORS_ORIGINS || "http://localhost:3000").split(",")[0].trim(),
+  intasend: intasendConfig(),
 };
