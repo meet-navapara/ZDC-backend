@@ -39,7 +39,10 @@ export async function syncIntasendPayment(payment, extraIds = {}) {
     throw err;
   }
 
-  const verified = await verifyPayment({ invoiceId, checkoutId });
+  const paymentAgeMs = payment.createdAt
+    ? Date.now() - new Date(payment.createdAt).getTime()
+    : 0;
+  const verified = await verifyPayment({ invoiceId, checkoutId, paymentAgeMs });
 
   if (verified.status === "paid") {
     if (

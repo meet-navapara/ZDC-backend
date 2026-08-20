@@ -49,6 +49,31 @@ export function sanitizePhone(value) {
 }
 
 export function invoiceFromStatus(data) {
+  // IntaSend returns HTTP 200 with {"detail":"Invoice with specified id does not exist"}
+  // when queried by checkout_id before the invoice is created, or for unknown IDs.
+  // Treat this as a "no data yet" response rather than a real failure state.
+  const isNoData =
+    !data ||
+    (data.detail && !data.invoice && !data.state && !data.invoice_id) ||
+    typeof data.detail === "string";
+
+  if (isNoData) {
+    return {
+      invoiceId: null,
+      state: null,
+      amount: null,
+      currency: null,
+      apiRef: null,
+      provider: null,
+      providerRef: null,
+      failedReason: null,
+      failedCode: null,
+      retryCount: null,
+      checkoutId: null,
+      noData: true,
+    };
+  }
+
   const invoice = data?.invoice || data || {};
   return {
     invoiceId: invoice.invoice_id || invoice.id || data?.invoice_id || null,
@@ -62,19 +87,41 @@ export function invoiceFromStatus(data) {
     failedCode: invoice.failed_code || data?.failed_code || null,
     retryCount: invoice.retry_count ?? data?.retry_count ?? null,
     checkoutId: data?.meta?.id || null,
+    noData: false,
   };
 }
 
+/** Minimum age before a null-provider_ref card PENDING/PROCESSING is treated as dead. */
+export const DEAD_CARD_MIN_AGE_MS = 120_000;
+
 /**
- * IntaSend sandbox card 3DS never completes — invoice stays PENDING with
- * provider_ref: null and retry_count: 0. Detect this "dead" state so we
- * can surface a real error instead of polling forever.
+ * IntaSend card 3DS can stall — invoice stays PENDING or PROCESSING with
+ * provider_ref: null. That is also the *normal* state while 3DS is in progress,
+ * so we only treat it as dead after the payment has been open long enough.
  */
-export function isDeadCardPending(parsed) {
-  if (String(parsed.state || "").toUpperCase() !== "PENDING") return false;
+export function isDeadCardPending(parsed, { paymentAgeMs = 0, minAgeMs = DEAD_CARD_MIN_AGE_MS } = {}) {
+  const state = String(parsed.state || "").toUpperCase();
+  if (state !== "PENDING" && state !== "PROCESSING") return false;
   const provider = String(parsed.provider || "").toUpperCase();
   if (!provider.includes("CARD")) return false;
-  // provider_ref is set once the card processor responds; null means 3DS stalled
+  // provider_ref is set once the card processor responds; null means 3DS not done
   if (parsed.providerRef !== null && parsed.providerRef !== undefined) return false;
+  if (Number(paymentAgeMs) < Number(minAgeMs)) return false;
   return true;
+}
+
+/**
+ * M-Pesa STK push can stay PROCESSING for a long time if the user never
+ * enters their PIN, or if the sandbox phone is not reachable.
+ * After retryCount exceeds the threshold, or once it's been PROCESSING
+ * with no activity, surface it as failed so the UI stops looping.
+ */
+export function isDeadMpesaProcessing(parsed) {
+  const state = String(parsed.state || "").toUpperCase();
+  if (state !== "PROCESSING") return false;
+  const provider = String(parsed.provider || "").toUpperCase();
+  if (!provider.includes("PESA") && !provider.includes("MPESA")) return false;
+  // IntaSend retries STK up to 2 times; if retry_count >= 2 and still PROCESSING, it's stuck
+  if (parsed.retryCount != null && Number(parsed.retryCount) >= 2) return true;
+  return false;
 }

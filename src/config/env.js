@@ -68,6 +68,10 @@ function intasendConfig() {
   const live = environment === "live" && !isTestKey;
   const sandbox = !live;
   const methodRaw = (process.env.INTASEND_CHECKOUT_METHOD || "").trim().toUpperCase();
+  // On http://localhost, card 3DS often hangs — default sandbox to M-PESA only.
+  // When FRONTEND_URL is HTTPS (tunnel/Vercel), leave method open so Card + M-Pesa both work.
+  const frontendUrl = (process.env.FRONTEND_URL || process.env.CORS_ORIGINS || "").split(",")[0].trim();
+  const frontendIsHttps = /^https:\/\//i.test(frontendUrl);
   const checkoutMethod =
     methodRaw === "M-PESA" ||
     methodRaw === "CARD-PAYMENT" ||
@@ -78,7 +82,7 @@ function intasendConfig() {
           ? "CARD-PAYMENT"
           : "M-PESA"
         : methodRaw
-      : sandbox
+      : sandbox && !frontendIsHttps
         ? "M-PESA"
         : "";
   return {

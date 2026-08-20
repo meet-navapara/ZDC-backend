@@ -1,6 +1,6 @@
 import { env } from "../../config/env.js";
 import { intasendRequest, isIntasendConfigured } from "./client.js";
-import { invoiceFromStatus, isDeadCardPending, mapIntasendState, sanitizeIntasendText, sanitizePhone } from "./status.js";
+import { invoiceFromStatus, isDeadCardPending, isDeadMpesaProcessing, mapIntasendState, sanitizeIntasendText, sanitizePhone } from "./status.js";
 
 export { isIntasendConfigured };
 
@@ -156,7 +156,7 @@ export function buildPaymentStatusRequestBody({ invoiceId, checkoutId }) {
   return body;
 }
 
-export async function getPaymentStatus({ invoiceId, checkoutId }) {
+export async function getPaymentStatus({ invoiceId, checkoutId, paymentAgeMs = 0 } = {}) {
   // IntaSend supports checking by `invoice_id` OR `checkout_id`.
   // When checkout is created, `invoice_id` can be null; in that case we must
   // query using `checkout_id` only, otherwise status stays stuck.
@@ -165,9 +165,32 @@ export async function getPaymentStatus({ invoiceId, checkoutId }) {
     auth: "secret",
   });
   const parsed = invoiceFromStatus(data);
-  const deadCard = isDeadCardPending(parsed);
+
+  // noData = IntaSend said "Invoice does not exist" with HTTP 200.
+  // This happens when querying by checkout_id before the invoice is linked,
+  // or for very old/stale checkout IDs. Treat as still-pending rather than
+  // marking the payment as failed, so a later webhook can still resolve it.
+  if (parsed.noData) {
+    return {
+      status: "pending",
+      providerState: null,
+      amount: null,
+      currency: null,
+      providerInvoiceId: null,
+      providerCheckoutId: checkoutId || null,
+      apiRef: null,
+      method: null,
+      failedReason: null,
+      _parsed: parsed,
+    };
+  }
+
+  const deadCard = isDeadCardPending(parsed, { paymentAgeMs });
+  const deadMpesa = isDeadMpesaProcessing(parsed);
+  const isFailed = deadCard || deadMpesa;
+
   return {
-    status: deadCard ? "failed" : mapIntasendState(parsed.state),
+    status: isFailed ? "failed" : mapIntasendState(parsed.state),
     providerState: parsed.state,
     amount: parsed.amount,
     currency: parsed.currency,
@@ -177,7 +200,9 @@ export async function getPaymentStatus({ invoiceId, checkoutId }) {
     method: parsed.provider,
     failedReason: deadCard
       ? "Card 3DS authentication did not complete. Use M-Pesa (254708374149) for sandbox testing, or try a real card in live mode."
-      : parsed.failedReason,
+      : deadMpesa
+        ? "M-Pesa STK push did not complete. Please check your phone and try again."
+        : parsed.failedReason,
     _parsed: parsed,
   };
 }

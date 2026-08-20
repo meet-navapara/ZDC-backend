@@ -6,6 +6,8 @@ import {
   nextPaymentTransition,
   sanitizeIntasendText,
   invoiceFromStatus,
+  isDeadCardPending,
+  isDeadMpesaProcessing,
 } from "./status.js";
 
 describe("mapIntasendState", () => {
@@ -65,5 +67,70 @@ describe("invoiceFromStatus", () => {
     assert.equal(parsed.invoiceId, "XMSLWOS");
     assert.equal(parsed.state, "COMPLETE");
     assert.equal(parsed.currency, "KES");
+    assert.equal(parsed.noData, false);
+  });
+
+  it("returns noData=true for IntaSend 'does not exist' 200 response", () => {
+    const parsed = invoiceFromStatus({ detail: "Invoice with specified id does not exist" });
+    assert.equal(parsed.noData, true);
+    assert.equal(parsed.state, null);
+    assert.equal(parsed.invoiceId, null);
+  });
+
+  it("returns noData=true for null response", () => {
+    assert.equal(invoiceFromStatus(null).noData, true);
+  });
+});
+
+describe("isDeadCardPending", () => {
+  const cardPending = { state: "PENDING", provider: "CARD-PAYMENT", providerRef: null };
+
+  it("does NOT flag a fresh PENDING card (normal 3DS window)", () => {
+    assert.equal(isDeadCardPending(cardPending, { paymentAgeMs: 5_000 }), false);
+  });
+  it("detects PENDING card with no provider_ref as dead after min age", () => {
+    assert.equal(isDeadCardPending(cardPending, { paymentAgeMs: 120_000 }), true);
+  });
+  it("detects PROCESSING card with no provider_ref as dead after min age", () => {
+    assert.equal(
+      isDeadCardPending(
+        { state: "PROCESSING", provider: "CARD-PAYMENT", providerRef: null },
+        { paymentAgeMs: 120_000 }
+      ),
+      true
+    );
+  });
+  it("does not flag card with a provider_ref", () => {
+    assert.equal(
+      isDeadCardPending(
+        { state: "PENDING", provider: "CARD-PAYMENT", providerRef: "XYZ" },
+        { paymentAgeMs: 120_000 }
+      ),
+      false
+    );
+  });
+  it("does not flag M-Pesa", () => {
+    assert.equal(
+      isDeadCardPending(
+        { state: "PENDING", provider: "M-PESA", providerRef: null },
+        { paymentAgeMs: 120_000 }
+      ),
+      false
+    );
+  });
+});
+
+describe("isDeadMpesaProcessing", () => {
+  it("detects M-Pesa PROCESSING with high retry_count as dead", () => {
+    assert.equal(isDeadMpesaProcessing({ state: "PROCESSING", provider: "M-PESA", retryCount: 2 }), true);
+  });
+  it("does not flag M-Pesa PROCESSING with low retry_count", () => {
+    assert.equal(isDeadMpesaProcessing({ state: "PROCESSING", provider: "M-PESA", retryCount: 1 }), false);
+  });
+  it("does not flag M-Pesa PENDING", () => {
+    assert.equal(isDeadMpesaProcessing({ state: "PENDING", provider: "M-PESA", retryCount: 3 }), false);
+  });
+  it("does not flag card", () => {
+    assert.equal(isDeadMpesaProcessing({ state: "PROCESSING", provider: "CARD-PAYMENT", retryCount: 3 }), false);
   });
 });
