@@ -5,16 +5,33 @@ import { verifyPayment } from "./checkout.js";
 import { verifyWebhookChallenge } from "./webhookAuth.js";
 import { applyVerifiedPayment } from "../paymentFulfillment.js";
 
-export async function syncIntasendPayment(payment, extraIds = {}) {
-  // IntaSend checkout can be created before it has an invoice_id.
-  // When invoice_id is missing, we must poll using checkout_id only,
-  // otherwise status can stay stuck at PENDING/PROCESSING forever.
+/**
+ * Persist invoice_id from IntaSend webhook when checkout creation did not return one.
+ * Returns true when providerInvoiceId was set on the in-memory payment document.
+ */
+export function persistInvoiceIdIfMissing(payment, invoiceId) {
+  const id = String(invoiceId ?? "").trim();
+  if (!id) return false;
+  if (payment.providerInvoiceId) return false;
+  payment.providerInvoiceId = id;
+  return true;
+}
+
+export function resolveIntasendStatusIds(payment, extraIds = {}) {
   const checkoutId = extraIds.checkoutId || payment.providerCheckoutId;
   const invoiceId =
     extraIds.invoiceId ||
     payment.providerInvoiceId ||
     // Only fall back to `reference` when we don't have checkout_id.
     (!checkoutId ? payment.reference : undefined);
+  return { invoiceId, checkoutId };
+}
+
+export async function syncIntasendPayment(payment, extraIds = {}) {
+  // IntaSend checkout can be created before it has an invoice_id.
+  // When invoice_id is missing, we must poll using checkout_id only,
+  // otherwise status can stay stuck at PENDING/PROCESSING forever.
+  const { invoiceId, checkoutId } = resolveIntasendStatusIds(payment, extraIds);
   if (!invoiceId && !checkoutId) {
     const err = new Error("Payment has no IntaSend invoice id");
     err.status = 409;
@@ -87,6 +104,10 @@ export async function handleIntasendWebhook(req) {
       apiRef: body.api_ref || null,
     });
     return { ok: true, ignored: true };
+  }
+
+  if (persistInvoiceIdIfMissing(payment, body.invoice_id)) {
+    await payment.save();
   }
 
   const updated = await syncIntasendPayment(payment, {

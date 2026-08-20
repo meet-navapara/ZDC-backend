@@ -141,10 +141,7 @@ export async function createCheckoutSession({
  * @see https://developers.intasend.com/docs/payment-status
  * @see https://developers.intasend.com/reference/api_v1_payment_status_create
  */
-export async function getPaymentStatus({ invoiceId, checkoutId }) {
-  // IntaSend supports checking by `invoice_id` OR `checkout_id`.
-  // When checkout is created, `invoice_id` can be null; in that case we must
-  // query using `checkout_id` only, otherwise status stays stuck.
+export function buildPaymentStatusRequestBody({ invoiceId, checkoutId }) {
   const body = {};
   if (invoiceId) {
     body.invoice_id = invoiceId;
@@ -156,6 +153,14 @@ export async function getPaymentStatus({ invoiceId, checkoutId }) {
     err.status = 400;
     throw err;
   }
+  return body;
+}
+
+export async function getPaymentStatus({ invoiceId, checkoutId }) {
+  // IntaSend supports checking by `invoice_id` OR `checkout_id`.
+  // When checkout is created, `invoice_id` can be null; in that case we must
+  // query using `checkout_id` only, otherwise status stays stuck.
+  const body = buildPaymentStatusRequestBody({ invoiceId, checkoutId });
   const data = await intasendRequest("POST", "/api/v1/payment/status/", body, {
     auth: "secret",
   });
