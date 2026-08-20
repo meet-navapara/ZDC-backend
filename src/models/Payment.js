@@ -14,8 +14,7 @@ const paymentSchema = new Schema(
     purpose: { type: String, default: "b2c_tryon" },
     status: { type: String, enum: PAYMENT_STATUSES, default: "pending" },
     reference: { type: String, default: null },
-    // Omit until IntaSend returns an invoice_id. Unique+sparse still indexes
-    // explicit null, so a second unpaid checkout used to 500 with E11000.
+    // Optional external invoice id from a former provider; unique when set.
     providerInvoiceId: { type: String },
     providerCheckoutId: { type: String, default: null },
     checkoutUrl: { type: String, default: null },

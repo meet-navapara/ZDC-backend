@@ -1,10 +1,5 @@
 // Payment provider interface.
-//
-// Stub marks charges paid immediately (local demo).
-// IntaSend Checkout creates a hosted payment link and returns pending + checkoutUrl.
-
-import { env } from "../config/env.js";
-import { isIntasendConfigured, createCheckoutSession } from "./intasend/checkout.js";
+// Stub marks charges paid immediately (demo / until a live gateway is wired).
 
 class StubProvider {
   constructor() {
@@ -22,85 +17,48 @@ class StubProvider {
   }
 }
 
-export const CHECKOUT_REUSE_MS = 25 * 60 * 1000;
-
-export { isIntasendConfigured };
-
-/** Keys present and IntaSend allowed for checkout (off by default in dev). */
-export function isIntasendEnabled() {
-  return isIntasendConfigured() && env.intasend.enabled;
-}
-
 export function resolveGateway(requested) {
   const req = requested || null;
   if (req === "referral") return "referral";
-
-  const intasendOn = isIntasendEnabled();
-  if (env.isProd && intasendOn) {
-    if (req && req !== "intasend") {
-      const err = new Error("This server only accepts IntaSend for paid orders.");
-      err.status = 400;
-      err.publicMessage = err.message;
-      throw err;
-    }
-    return "intasend";
+  if (req === "intasend" || req === "mpesa") {
+    const err = new Error("That payment method is no longer available");
+    err.status = 400;
+    err.publicMessage =
+      "External card/M-Pesa checkout is disabled. Use demo payment for now.";
+    throw err;
   }
-
-  if (req === "intasend") {
-    if (!isIntasendConfigured()) {
-      const err = new Error("IntaSend is not configured");
-      err.status = 503;
-      err.publicMessage =
-        "IntaSend is not configured. Add INTASEND_PUBLIC_KEY and INTASEND_SECRET_KEY.";
-      throw err;
-    }
-    if (!intasendOn) {
-      const err = new Error("IntaSend is disabled in this environment");
-      err.status = 503;
-      err.publicMessage =
-        "IntaSend checkout is off locally. Pay with demo mode (instant), or set INTASEND_ENABLED=true with an HTTPS FRONTEND_URL.";
-      throw err;
-    }
-    return "intasend";
-  }
-
-  if (!req && intasendOn) return "intasend";
   return "stub";
 }
 
 export function getPaymentProvider(gateway = "stub") {
-  if (gateway === "intasend") {
-    return {
-      name: "intasend",
-      async createCharge(params) {
-        return createCheckoutSession(params);
-      },
-    };
-  }
   return new StubProvider();
 }
 
 export function publicPaymentMethods() {
-  const configured = isIntasendConfigured();
-  const enabled = isIntasendEnabled();
-  const methods = [];
-  if (enabled) {
-    methods.push({ id: "intasend", label: "IntaSend", available: true });
-  }
-  if (!env.isProd || !enabled) {
-    methods.push({ id: "stub", label: "Demo (instant, no charge)", available: true });
-  }
   return {
-    defaultGateway: enabled ? "intasend" : "stub",
-    intasendConfigured: configured,
-    intasendEnabled: enabled,
-    sandbox: configured && env.intasend.environment !== "live",
-    intasendCheckoutMethod: enabled ? env.intasend.checkoutMethod || null : null,
-    paymentNotice: enabled
-      ? null
-      : configured && !env.isProd
-        ? "Demo payment is active. IntaSend M-Pesa needs a Kenya Safaricom line; card sandbox often hangs. Set INTASEND_ENABLED=true only when testing from Kenya or with a working sandbox setup."
-        : null,
-    methods,
+    defaultGateway: "stub",
+    methods: [{ id: "stub", label: "Demo (instant, no charge)", available: true }],
+    paymentNotice:
+      "Demo payment is active. Live card/M-Pesa checkout will be added with a new provider.",
   };
+}
+
+/** Shared status transitions for paid / failed / cancelled (idempotent fulfill). */
+export function nextPaymentTransition(currentStatus, verifiedStatus) {
+  if (currentStatus === "paid" && verifiedStatus === "refunded") {
+    return { status: "refunded", fulfill: false, alreadyPaid: true };
+  }
+  if (currentStatus === "paid") {
+    return { status: "paid", fulfill: false, alreadyPaid: true };
+  }
+  if (verifiedStatus === "paid") {
+    return { status: "paid", fulfill: true, alreadyPaid: false };
+  }
+  if (verifiedStatus === "cancelled" && currentStatus === "pending") {
+    return { status: "cancelled", fulfill: false, alreadyPaid: false };
+  }
+  if (verifiedStatus === "failed" && currentStatus === "pending") {
+    return { status: "failed", fulfill: false, alreadyPaid: false };
+  }
+  return { status: currentStatus, fulfill: false, alreadyPaid: false };
 }

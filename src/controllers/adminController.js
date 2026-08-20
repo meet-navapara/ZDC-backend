@@ -12,7 +12,6 @@ import { getPricingSafe, updatePricing } from "../services/pricing.js";
 import { getContentSafe, updateContent } from "../services/siteContent.js";
 import { buildPlatformStats } from "../services/platformStats.js";
 import { recordAudit } from "../services/audit.js";
-import { refundPayment as refundIntasendPayment } from "../services/intasend/checkout.js";
 import { AuditLog, AUDIT_ACTIONS } from "../models/AuditLog.js";
 import {
   passwordField,
@@ -357,32 +356,9 @@ export async function refundPayment(req, res, next) {
     if (payment.status !== "paid") {
       return res.status(409).json({ error: "Only paid payments can be refunded" });
     }
-    if (payment.gateway !== "intasend") {
-      return res.status(400).json({ error: "Refunds via API are only supported for IntaSend" });
-    }
-    const invoiceId = payment.providerInvoiceId || payment.reference;
-    if (!invoiceId) {
-      return res.status(409).json({ error: "Missing IntaSend invoice id" });
-    }
-    await refundIntasendPayment({
-      invoiceId,
-      amount: payment.amount,
-      reason: "Admin refund",
-    });
-    payment.status = "refunded";
-    payment.meta = {
-      ...(payment.meta && typeof payment.meta === "object" ? payment.meta : {}),
-      refundedAt: new Date().toISOString(),
-    };
-    await payment.save();
-    return res.json({
-      payment: {
-        id: String(payment._id),
-        status: payment.status,
-        gateway: payment.gateway,
-        amount: payment.amount,
-        currency: payment.currency,
-      },
+    return res.status(400).json({
+      error:
+        "Online refunds are not available. Mark refunds manually until a payment provider is configured.",
     });
   } catch (err) {
     if (err instanceof z.ZodError) {

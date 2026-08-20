@@ -43,73 +43,6 @@ function parseTrustProxy() {
   return Number.isNaN(n) ? raw : n;
 }
 
-function parseIntasendEnabled(hasKeys) {
-  const raw = (process.env.INTASEND_ENABLED || "").trim().toLowerCase();
-  if (raw === "true" || raw === "1" || raw === "yes") return hasKeys;
-  if (raw === "false" || raw === "0" || raw === "no") return false;
-  // Dev defaults to stub — IntaSend card 3DS needs HTTPS and hangs on localhost.
-  return isProd && hasKeys;
-}
-
-function intasendConfig() {
-  const raw = (process.env.INTASEND_ENVIRONMENT || "").trim().toLowerCase();
-  const testFlag = (process.env.INTASEND_TEST || "").toLowerCase() === "true";
-  const publicKey =
-    (process.env.INTASEND_PUBLIC_KEY || process.env.INTASEND_API_KEY || "").trim();
-  const secretKey = (process.env.INTASEND_SECRET_KEY || "").trim();
-  const hasKeys = Boolean(publicKey && secretKey);
-  const isTestKey = /test/i.test(publicKey) || /test/i.test(secretKey);
-  const environment =
-    raw === "live" || raw === "production"
-      ? "live"
-      : raw === "sandbox" || raw === "test" || testFlag || isTestKey || !raw
-        ? "sandbox"
-        : "sandbox";
-  const live = environment === "live" && !isTestKey;
-  const sandbox = !live;
-  const methodRaw = (process.env.INTASEND_CHECKOUT_METHOD || "").trim().toUpperCase();
-  // On http://localhost, card 3DS often hangs — default sandbox to M-PESA only.
-  // When FRONTEND_URL is HTTPS (tunnel/Vercel), leave method open so Card + M-Pesa both work.
-  const frontendUrl = (process.env.FRONTEND_URL || process.env.CORS_ORIGINS || "").split(",")[0].trim();
-  const frontendIsHttps = /^https:\/\//i.test(frontendUrl);
-  const checkoutMethod =
-    methodRaw === "M-PESA" ||
-    methodRaw === "CARD-PAYMENT" ||
-    methodRaw === "CARD" ||
-    methodRaw === "MPESA"
-      ? methodRaw === "CARD" || methodRaw === "MPESA"
-        ? methodRaw === "CARD"
-          ? "CARD-PAYMENT"
-          : "M-PESA"
-        : methodRaw
-      : sandbox && !frontendIsHttps
-        ? "M-PESA"
-        : "";
-  return {
-    environment: live ? "live" : "sandbox",
-    publicKey,
-    secretKey,
-    hasKeys,
-    enabled: parseIntasendEnabled(hasKeys),
-    checkoutMethod,
-    // IntaSend sandbox M-Pesa often requires a valid phone_number.
-    // If the user/biz profile has no phone, fall back to their documented sandbox test number.
-    mockMpesaPhone: String(
-      (process.env.INTASEND_MOCK_MPESA_PHONE || "254708374149").trim()
-    ).replace(/[^\d]/g, ""),
-    webhookChallenge: (process.env.INTASEND_WEBHOOK_CHALLENGE || "").trim(),
-    country: (process.env.INTASEND_COUNTRY || "KE").trim().toUpperCase().slice(0, 2),
-    apiBase: (
-      process.env.INTASEND_API_BASE ||
-      (live ? "https://payment.intasend.com" : "https://sandbox.intasend.com")
-    ).replace(/\/$/, ""),
-    timeoutMs: Math.min(
-      60000,
-      Math.max(5000, parseInt(process.env.INTASEND_TIMEOUT_MS || "20000", 10) || 20000)
-    ),
-  };
-}
-
 export const env = {
   nodeEnv,
   isProd,
@@ -145,5 +78,4 @@ export const env = {
   frontendUrl:
     (process.env.FRONTEND_URL || "").trim() ||
     (process.env.CORS_ORIGINS || "http://localhost:3000").split(",")[0].trim(),
-  intasend: intasendConfig(),
 };

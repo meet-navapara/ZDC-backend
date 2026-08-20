@@ -6,12 +6,10 @@ import {
   listPaymentMethods,
   getPayment,
   cancelPayment,
-  intasendWebhook,
 } from "../controllers/paymentsController.js";
 
 const router = Router();
 
-router.post("/intasend/webhook", intasendWebhook);
 router.get("/methods", requireAuth, listPaymentMethods);
 router.get("/mine", requireAuth, listMyPayments);
 router.get("/:id", requireAuth, getPayment);
