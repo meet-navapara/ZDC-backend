@@ -37,8 +37,24 @@ if (cloudinaryEnabled) {
   );
 }
 
-const LOCAL_DIR = path.resolve(process.env.FILE_STORAGE_DIR || "uploads");
-if (!cloudinaryEnabled) fs.mkdirSync(LOCAL_DIR, { recursive: true });
+// On Vercel the deployment FS is read-only; only /tmp is writable.
+// Creating ./uploads at import time would crash the serverless function
+// (FUNCTION_INVOCATION_FAILED) when Cloudinary is not configured.
+const LOCAL_DIR = path.resolve(
+  process.env.FILE_STORAGE_DIR ||
+    (process.env.VERCEL ? "/tmp/zdc-uploads" : "uploads")
+);
+if (!cloudinaryEnabled) {
+  try {
+    fs.mkdirSync(LOCAL_DIR, { recursive: true });
+  } catch (err) {
+    console.warn(
+      "[storage] Could not create local upload dir:",
+      err?.message || err,
+      "— set CLOUDINARY_URL for production."
+    );
+  }
+}
 
 /**
  * Uploads an image buffer and returns a public URL + provider metadata.

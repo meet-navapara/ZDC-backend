@@ -68,8 +68,14 @@ export function createApp() {
   app.use("/api/contact", contactRoutes);
 
   // Sentry must capture route errors before our JSON error responder runs.
-  // No-op if Sentry was not initialized (no SENTRY_DSN).
-  Sentry.setupExpressErrorHandler(app);
+  // Guard: never let monitoring setup crash the serverless cold start.
+  try {
+    if (typeof Sentry.setupExpressErrorHandler === "function") {
+      Sentry.setupExpressErrorHandler(app);
+    }
+  } catch (err) {
+    console.warn("[app] Sentry Express handler skipped:", err?.message || err);
+  }
 
   app.use(notFound);
   app.use(errorHandler);

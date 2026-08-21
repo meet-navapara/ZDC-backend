@@ -4,25 +4,36 @@ dotenv.config();
 
 const nodeEnv = process.env.NODE_ENV || "development";
 const isProd = nodeEnv === "production";
+/** True on Vercel (serverless). Never call process.exit here — it becomes FUNCTION_INVOCATION_FAILED. */
+const isVercel = Boolean(process.env.VERCEL);
 
 const DEFAULT_JWT_SECRET = "dev-insecure-secret-change-me";
 const jwtSecret = process.env.JWT_SECRET || DEFAULT_JWT_SECRET;
 
-// In production we refuse to boot with insecure defaults — a leaked or default
-// JWT secret means anyone can mint valid tokens. Fail fast and loudly.
+/**
+ * Production config problems. Empty when safe to serve traffic.
+ * Callers: long-running `server.js` may exit; Vercel handler must return JSON instead.
+ */
+export const envFatalErrors = [];
+
 if (isProd) {
-  const fatal = [];
-  if (!process.env.MONGODB_URI) fatal.push("MONGODB_URI is required in production");
+  if (!process.env.MONGODB_URI) {
+    envFatalErrors.push("MONGODB_URI is required in production");
+  }
   if (!process.env.JWT_SECRET || jwtSecret === DEFAULT_JWT_SECRET) {
-    fatal.push("JWT_SECRET must be set to a strong, unique value in production");
+    envFatalErrors.push("JWT_SECRET must be set to a strong, unique value in production");
   }
   if (jwtSecret.length < 32) {
-    fatal.push("JWT_SECRET should be at least 32 characters in production");
+    envFatalErrors.push("JWT_SECRET should be at least 32 characters in production");
   }
-  if (fatal.length) {
+  if (envFatalErrors.length) {
     console.error("[env] Refusing to start due to unsafe configuration:");
-    for (const m of fatal) console.error(`  - ${m}`);
-    process.exit(1);
+    for (const m of envFatalErrors) console.error(`  - ${m}`);
+    // Local / Docker / Render long-running process: fail fast.
+    // On Vercel, exiting kills the whole serverless isolate → pink crash page.
+    if (!isVercel) {
+      process.exit(1);
+    }
   }
 } else {
   for (const key of ["MONGODB_URI", "JWT_SECRET"]) {
@@ -46,6 +57,7 @@ function parseTrustProxy() {
 export const env = {
   nodeEnv,
   isProd,
+  isVercel,
   port: parseInt(process.env.PORT || "8080", 10),
   mongoUri: process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/zdc",
   jwt: {
