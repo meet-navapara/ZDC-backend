@@ -54,6 +54,56 @@ function parseTrustProxy() {
   return Number.isNaN(n) ? raw : n;
 }
 
+/**
+ * Build the browser origin allowlist.
+ * - Merges CORS_ORIGINS + FRONTEND_URL
+ * - Adds www ↔ apex twins (https://zimji.com ↔ https://www.zimji.com)
+ * - Strips trailing slashes (browsers never send them on Origin)
+ */
+function buildCorsOrigins() {
+  const raw = [
+    ...(process.env.CORS_ORIGINS || "http://localhost:3000").split(","),
+    process.env.FRONTEND_URL || "",
+  ];
+  const set = new Set();
+  for (const part of raw) {
+    const origin = String(part || "")
+      .trim()
+      .replace(/\/+$/, "");
+    if (!origin) continue;
+    set.add(origin);
+    try {
+      const u = new URL(origin);
+      // Only twin www ↔ apex for real custom domains (not *.vercel.app / localhost).
+      const host = u.hostname;
+      if (
+        host === "localhost" ||
+        host.endsWith(".vercel.app") ||
+        host.endsWith(".ngrok-free.dev") ||
+        host.endsWith(".ngrok.io")
+      ) {
+        continue;
+      }
+      if (host.startsWith("www.")) {
+        u.hostname = host.slice(4);
+        set.add(u.origin);
+      } else if (host.includes(".")) {
+        u.hostname = `www.${host}`;
+        set.add(u.origin);
+      }
+    } catch {
+      // ignore invalid URL fragments
+    }
+  }
+  return [...set];
+}
+
+const corsOrigins = buildCorsOrigins();
+const frontendUrl =
+  (process.env.FRONTEND_URL || "").trim().replace(/\/+$/, "") ||
+  corsOrigins[0] ||
+  "http://localhost:3000";
+
 export const env = {
   nodeEnv,
   isProd,
@@ -64,10 +114,7 @@ export const env = {
     secret: jwtSecret,
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",
   },
-  corsOrigins: (process.env.CORS_ORIGINS || "http://localhost:3000")
-    .split(",")
-    .map((o) => o.trim())
-    .filter(Boolean),
+  corsOrigins,
   trustProxy: parseTrustProxy(),
   // When false (default), new B2B accounts start as "pending" and must be
   // approved by a Super Admin before they can operate. Set B2B_AUTO_APPROVE=true
@@ -87,7 +134,12 @@ export const env = {
   // When true, signup OTP skips SMTP and always uses MOCK_OTP_CODE (shown in UI).
   otpMock: (process.env.OTP_MOCK || "true").toLowerCase() === "true",
   mockOtpCode: (process.env.MOCK_OTP_CODE || "123456").trim() || "123456",
-  frontendUrl:
-    (process.env.FRONTEND_URL || "").trim() ||
-    (process.env.CORS_ORIGINS || "http://localhost:3000").split(",")[0].trim(),
+  frontendUrl,
 };
+
+/** True if this Origin may call the API (credentials CORS). */
+export function isAllowedCorsOrigin(origin) {
+  if (!origin) return false;
+  const normalized = String(origin).trim().replace(/\/+$/, "");
+  return env.corsOrigins.includes(normalized);
+}

@@ -30,10 +30,18 @@ export function createApp() {
   app.use(helmet());
   app.use(
     cors({
-      // In production only the explicitly-allowlisted origins are permitted;
-      // in dev we fall back to reflecting the request origin for convenience.
-      origin: env.corsOrigins.length ? env.corsOrigins : env.isProd ? false : true,
+      // Reflect only allowlisted origins (see env.buildCorsOrigins).
+      // In dev with an empty list, reflect the request origin for convenience.
+      origin(origin, callback) {
+        if (!origin) return callback(null, true); // same-origin / curl / server-to-server
+        if (!env.isProd) return callback(null, true);
+        if (env.corsOrigins.includes(origin)) return callback(null, true);
+        console.warn(`[cors] Blocked origin: ${origin}. Allowed: ${env.corsOrigins.join(", ")}`);
+        return callback(null, false);
+      },
       credentials: true,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization"],
     })
   );
 

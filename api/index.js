@@ -7,10 +7,28 @@
  */
 import { createApp } from "../src/app.js";
 import { connectDB } from "../src/config/db.js";
-import { envFatalErrors } from "../src/config/env.js";
+import { envFatalErrors, isAllowedCorsOrigin } from "../src/config/env.js";
 import { getRedis, isRedisEnabled } from "../src/config/redis.js";
 
-function sendJson(res, status, body) {
+function applyCors(req, res) {
+  const origin = req.headers?.origin;
+  if (origin && isAllowedCorsOrigin(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader(
+      "Access-Control-Allow-Methods",
+      "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+    );
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization"
+    );
+    res.setHeader("Vary", "Origin");
+  }
+}
+
+function sendJson(req, res, status, body) {
+  applyCors(req, res);
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
   res.end(JSON.stringify(body));
@@ -54,12 +72,21 @@ async function ensureReady() {
 }
 
 export default async function handler(req, res) {
+  // Answer CORS preflight even if DB/env is down so the browser shows a
+  // real API error instead of a misleading CORS failure.
+  if (req.method === "OPTIONS") {
+    applyCors(req, res);
+    res.statusCode = 204;
+    res.end();
+    return;
+  }
+
   try {
     await ensureReady();
   } catch (err) {
     console.error("[vercel] startup failed:", err?.message || err);
     if (err?.code === "ENV_FATAL") {
-      sendJson(res, 503, {
+      sendJson(req, res, 503, {
         error: "Service unavailable",
         detail:
           "Missing or invalid production environment variables on Vercel.",
@@ -68,7 +95,7 @@ export default async function handler(req, res) {
       });
       return;
     }
-    sendJson(res, 503, {
+    sendJson(req, res, 503, {
       error: "Service unavailable",
       detail:
         err?.code === "APP_INIT"
