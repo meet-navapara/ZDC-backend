@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TryonJob } from "../models/TryonJob.js";
 import { Payment } from "../models/Payment.js";
+import { User } from "../models/User.js";
 import {
   getPaymentProvider,
   resolveGateway,
@@ -9,10 +10,18 @@ import {
 import { startProcessing } from "./tryonController.js";
 import { consumeFreeTryon } from "../services/referral.js";
 import { objectIdField } from "../utils/validators.js";
+import {
+  isMpesaLive,
+  stkQuery,
+  mapStkResultCode,
+} from "../services/mpesa/daraja.js";
+import { applyVerifiedPayment } from "../services/mpesa/fulfill.js";
+import { scheduleSandboxAutoPaid } from "../services/mpesa/sandboxAutoPaid.js";
 
 const paySchema = z.object({
   jobId: objectIdField,
-  gateway: z.enum(["stub", "mpesa", "intasend", "referral"]).optional(),
+  gateway: z.enum(["stub", "mpesa", "intasend", "referral", "auto"]).optional(),
+  phone: z.string().trim().min(9).max(20).optional(),
   useFreeTryon: z.coerce.boolean().optional(),
 });
 
@@ -27,12 +36,19 @@ export function serializePayment(payment) {
     purpose: payment.purpose,
     job: payment.job ? String(payment.job) : null,
     failureReason: payment.failureReason || null,
+    providerCheckoutId: payment.providerCheckoutId || null,
+    customerMessage: payment.meta?.customerMessage || null,
     createdAt: payment.createdAt,
   };
 }
 
-export function listPaymentMethods(req, res) {
-  return res.json(publicPaymentMethods());
+export async function listPaymentMethods(req, res, next) {
+  try {
+    const user = req.user?.sub ? await User.findById(req.user.sub) : null;
+    return res.json(publicPaymentMethods(user));
+  } catch (err) {
+    return next(err);
+  }
 }
 
 export async function payForJob(req, res, next) {
@@ -41,6 +57,7 @@ export async function payForJob(req, res, next) {
       return res.status(401).json({ error: "Please log in to pay for a try-on" });
     }
     const data = paySchema.parse(req.body);
+    const user = await User.findById(req.user.sub);
 
     const job = await TryonJob.findById(data.jobId);
     if (!job) {
@@ -79,12 +96,24 @@ export async function payForJob(req, res, next) {
         meta: { freeTryon: true, freeTryonsRemaining: remaining },
       });
     } else {
-      const gateway = resolveGateway(data.gateway);
+      const requested =
+        data.gateway === "auto" || !data.gateway ? null : data.gateway;
+      const gateway = resolveGateway(requested, user, {
+        currency: job.currency,
+      });
       const provider = getPaymentProvider(gateway);
+      const phone =
+        data.phone ||
+        user?.phone ||
+        user?.business?.whatsapp ||
+        null;
+
       const charge = await provider.createCharge({
         amount: job.amount,
         currency: job.currency,
         reference: `job_${job._id}`,
+        phone,
+        description: "zimji try-on",
       });
 
       payment = await Payment.create({
@@ -96,12 +125,22 @@ export async function payForJob(req, res, next) {
         purpose: "b2c_tryon",
         status: charge.status,
         reference: charge.reference,
+        providerCheckoutId: charge.providerCheckoutId || null,
+        providerInvoiceId: charge.providerInvoiceId || undefined,
+        meta: charge.meta || null,
       });
 
+      // Pending until callback (or sandbox auto-pay after a short delay) —
+      // same wait/poll flow for B2C and B2B.
       if (charge.status !== "paid") {
-        return res.status(402).json({
-          error: "Payment not completed",
+        scheduleSandboxAutoPaid(payment._id);
+        return res.status(200).json({
+          error: null,
           payment: serializePayment(payment),
+          pending: true,
+          instructions:
+            charge.meta?.customerMessage ||
+            "Check your phone and enter your M-Pesa PIN to complete payment.",
         });
       }
     }
@@ -120,6 +159,9 @@ export async function payForJob(req, res, next) {
     if (err instanceof z.ZodError) {
       return res.status(400).json({ error: "Validation failed", details: err.issues });
     }
+    if (err.publicMessage) {
+      return res.status(err.status || 400).json({ error: err.publicMessage });
+    }
     return next(err);
   }
 }
@@ -131,7 +173,47 @@ export async function getPayment(req, res, next) {
     if (!payment) {
       return res.status(404).json({ error: "Payment not found" });
     }
-    return res.json({ payment: serializePayment(payment) });
+
+    // Optional Daraja query if STK callback is delayed.
+    // Throttle hard — polling every few seconds hits Spike Arrest (HTTP 429).
+    if (
+      payment.status === "pending" &&
+      payment.gateway === "mpesa" &&
+      payment.providerCheckoutId &&
+      isMpesaLive()
+    ) {
+      try {
+        const ageMs = Date.now() - new Date(payment.createdAt).getTime();
+        const lastQueryAt = payment.meta?.lastStkQueryAt
+          ? new Date(payment.meta.lastStkQueryAt).getTime()
+          : 0;
+        const sinceQuery = Date.now() - lastQueryAt;
+        if (ageMs > 20_000 && sinceQuery > 20_000) {
+          payment.meta = {
+            ...(payment.meta || {}),
+            lastStkQueryAt: new Date().toISOString(),
+          };
+          await payment.save();
+
+          const q = await stkQuery(payment.providerCheckoutId);
+          const verified = mapStkResultCode(q?.ResultCode, q?.ResultDesc || "");
+          if (verified) {
+            await applyVerifiedPayment(payment, verified, {
+              failureReason: q.ResultDesc,
+              meta: {
+                queryResultCode: q.ResultCode,
+                queryResultDesc: q.ResultDesc,
+              },
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("[mpesa] stkQuery failed:", err?.message || err);
+      }
+    }
+
+    const fresh = await Payment.findById(payment._id);
+    return res.json({ payment: serializePayment(fresh || payment) });
   } catch (err) {
     if (err instanceof z.ZodError) {
       return res.status(400).json({ error: "Validation failed", details: err.issues });

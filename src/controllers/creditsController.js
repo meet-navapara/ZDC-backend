@@ -1,12 +1,14 @@
 import { z } from "zod";
 import { getCreditPacks, getCreditPack } from "../services/pricing.js";
 import { Payment } from "../models/Payment.js";
+import { User } from "../models/User.js";
 import { getPaymentProvider, resolveGateway } from "../services/payments.js";
 import { addCredits, getBalance, listLedger } from "../services/credits.js";
 import { capture } from "../services/analytics.js";
 import { buildCreditInvoicePdf, invoiceContextForPayment } from "../services/invoice.js";
 import { objectIdField, slugField } from "../utils/validators.js";
 import { serializePayment } from "./paymentsController.js";
+import { scheduleSandboxAutoPaid } from "../services/mpesa/sandboxAutoPaid.js";
 
 export async function listCreditPacks(req, res, next) {
   try {
@@ -38,7 +40,8 @@ export async function getLedger(req, res, next) {
 
 const purchaseSchema = z.object({
   pack: slugField,
-  gateway: z.enum(["stub", "mpesa", "intasend"]).optional(),
+  gateway: z.enum(["stub", "mpesa", "intasend", "auto"]).optional(),
+  phone: z.string().trim().min(9).max(20).optional(),
 });
 
 export async function purchaseCredits(req, res, next) {
@@ -49,7 +52,12 @@ export async function purchaseCredits(req, res, next) {
       return res.status(400).json({ error: "Invalid credit pack" });
     }
 
-    const gateway = resolveGateway(data.gateway);
+    const user = await User.findById(req.user.sub);
+    const requested =
+      data.gateway === "auto" || !data.gateway ? null : data.gateway;
+    const gateway = resolveGateway(requested, user, {
+      currency: pack.currency,
+    });
     const packMeta = {
       packId: pack.id,
       packLabel: pack.label,
@@ -57,10 +65,15 @@ export async function purchaseCredits(req, res, next) {
     };
 
     const provider = getPaymentProvider(gateway);
+    const phone =
+      data.phone || user?.phone || user?.business?.whatsapp || null;
+
     const charge = await provider.createCharge({
       amount: pack.amount,
       currency: pack.currency,
-      reference: `credits_${data.pack}_${Date.now()}`,
+      reference: `credits_${data.pack}_${Date.now()}`.slice(0, 40),
+      phone,
+      description: "zimji credits",
     });
 
     const payment = await Payment.create({
@@ -71,13 +84,22 @@ export async function purchaseCredits(req, res, next) {
       purpose: "b2b_credits",
       status: charge.status,
       reference: charge.reference,
-      meta: packMeta,
+      providerCheckoutId: charge.providerCheckoutId || null,
+      providerInvoiceId: charge.providerInvoiceId || undefined,
+      meta: { ...packMeta, ...(charge.meta || {}) },
     });
 
+    // Always return pending for M-Pesa so B2B matches B2C: client shows
+    // "waiting for PIN", then polls until paid (callback or sandbox delay).
     if (charge.status !== "paid") {
-      return res.status(402).json({
-        error: "Payment not completed",
+      scheduleSandboxAutoPaid(payment._id);
+      return res.status(200).json({
+        error: null,
         payment: serializePayment(payment),
+        pending: true,
+        instructions:
+          charge.meta?.customerMessage ||
+          "Check your phone and enter your M-Pesa PIN to complete payment.",
       });
     }
 
@@ -106,6 +128,9 @@ export async function purchaseCredits(req, res, next) {
   } catch (err) {
     if (err instanceof z.ZodError) {
       return res.status(400).json({ error: "Validation failed", details: err.issues });
+    }
+    if (err.publicMessage) {
+      return res.status(err.status || 400).json({ error: err.publicMessage });
     }
     return next(err);
   }

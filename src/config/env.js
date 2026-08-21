@@ -135,7 +135,53 @@ export const env = {
   otpMock: (process.env.OTP_MOCK || "true").toLowerCase() === "true",
   mockOtpCode: (process.env.MOCK_OTP_CODE || "123456").trim() || "123456",
   frontendUrl,
+  mpesa: buildMpesaConfig(),
 };
+
+function buildMpesaConfig() {
+  const enabled =
+    (process.env.MPESA_ENABLED || "false").toLowerCase() === "true";
+  // Daraja secrets are often copied with a trailing "." from the portal UI.
+  const consumerKey = (process.env.MPESA_CONSUMER_KEY || "")
+    .trim()
+    .replace(/\.+$/, "");
+  const consumerSecret = (process.env.MPESA_CONSUMER_SECRET || "")
+    .trim()
+    .replace(/\.+$/, "");
+  const shortcode = (process.env.MPESA_SHORTCODE || "").trim();
+  const passkey = (process.env.MPESA_PASSKEY || "").trim();
+  const callbackUrl =
+    (process.env.MPESA_CALLBACK_URL || "").trim() ||
+    (isVercel
+      ? "https://zdc-backend.vercel.app/api/payments/mpesa/callback"
+      : "");
+  const configured = Boolean(
+    consumerKey && consumerSecret && shortcode && passkey && callbackUrl
+  );
+  return {
+    enabled,
+    configured,
+    env: (process.env.MPESA_ENV || "sandbox").toLowerCase() === "production"
+      ? "production"
+      : "sandbox",
+    consumerKey,
+    consumerSecret,
+    shortcode,
+    passkey,
+    callbackUrl,
+    // CustomerPayBillOnline for Paybill; CustomerBuyGoodsOnline for Till
+    transactionType:
+      (process.env.MPESA_TRANSACTION_TYPE || "CustomerPayBillOnline").trim() ||
+      "CustomerPayBillOnline",
+    /**
+     * LOCAL/SANDBOX ONLY. After a real STK "accepted", auto-mark paid in ~4s
+     * so you can verify try-on fulfill without Daraja PIN (DS timeout workaround).
+     * Never enable in production.
+     */
+    sandboxAutoPaid:
+      (process.env.MPESA_SANDBOX_AUTO_PAID || "false").toLowerCase() === "true",
+  };
+}
 
 /** True if this Origin may call the API (credentials CORS). */
 export function isAllowedCorsOrigin(origin) {

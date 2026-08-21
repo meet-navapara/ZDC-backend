@@ -7,8 +7,12 @@ import {
   getPayment,
   cancelPayment,
 } from "../controllers/paymentsController.js";
+import { mpesaStkCallback } from "../controllers/mpesaController.js";
 
 const router = Router();
+
+// Daraja callback must be public (no JWT).
+router.post("/mpesa/callback", mpesaStkCallback);
 
 router.get("/methods", requireAuth, listPaymentMethods);
 router.get("/mine", requireAuth, listMyPayments);
