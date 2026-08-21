@@ -8,12 +8,18 @@ import {
   cancelPayment,
 } from "../controllers/paymentsController.js";
 import { mpesaStkCallback } from "../controllers/mpesaController.js";
+import {
+  razorpayVerify,
+  razorpayWebhook,
+} from "../controllers/razorpayController.js";
 
 const router = Router();
 
-// Daraja callback must be public (no JWT).
+// Provider callbacks / webhooks — public (no JWT).
 router.post("/mpesa/callback", mpesaStkCallback);
+router.post("/razorpay/webhook", razorpayWebhook);
 
+router.post("/razorpay/verify", requireAuth, razorpayVerify);
 router.get("/methods", requireAuth, listPaymentMethods);
 router.get("/mine", requireAuth, listMyPayments);
 router.get("/:id", requireAuth, getPayment);

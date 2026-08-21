@@ -1,6 +1,7 @@
 import { z } from "zod";
 import mongoose from "mongoose";
 import { TryonJob, JOB_STATUSES } from "../models/TryonJob.js";
+import { User } from "../models/User.js";
 import { getPack, getB2cPacks } from "../services/pricing.js";
 import { getRenderer } from "../services/renderer.js";
 import { uploadImage } from "../services/storage.js";
@@ -16,7 +17,8 @@ const createSchema = z.object({
 
 export async function listPricing(req, res, next) {
   try {
-    const packs = await getB2cPacks();
+    const user = req.user?.sub ? await User.findById(req.user.sub) : null;
+    const packs = await getB2cPacks(user);
     return res.json({ packs });
   } catch (err) {
     return next(err);
@@ -29,7 +31,8 @@ export async function createJob(req, res, next) {
       return res.status(401).json({ error: "Please log in to start a try-on" });
     }
     const data = createSchema.parse(req.body);
-    const pack = await getPack(data.pack);
+    const user = await User.findById(req.user.sub);
+    const pack = await getPack(data.pack, user);
     if (!pack) {
       return res.status(400).json({ error: "Invalid pack" });
     }

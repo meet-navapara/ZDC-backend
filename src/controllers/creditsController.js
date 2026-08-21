@@ -12,7 +12,8 @@ import { scheduleSandboxAutoPaid } from "../services/mpesa/sandboxAutoPaid.js";
 
 export async function listCreditPacks(req, res, next) {
   try {
-    const packs = await getCreditPacks();
+    const user = req.user?.sub ? await User.findById(req.user.sub) : null;
+    const packs = await getCreditPacks(user);
     return res.json({ packs });
   } catch (err) {
     return next(err);
@@ -40,19 +41,18 @@ export async function getLedger(req, res, next) {
 
 const purchaseSchema = z.object({
   pack: slugField,
-  gateway: z.enum(["stub", "mpesa", "intasend", "auto"]).optional(),
+  gateway: z.enum(["stub", "mpesa", "razorpay", "intasend", "auto"]).optional(),
   phone: z.string().trim().min(9).max(20).optional(),
 });
 
 export async function purchaseCredits(req, res, next) {
   try {
     const data = purchaseSchema.parse(req.body);
-    const pack = await getCreditPack(data.pack);
+    const user = await User.findById(req.user.sub);
+    const pack = await getCreditPack(data.pack, user);
     if (!pack) {
       return res.status(400).json({ error: "Invalid credit pack" });
     }
-
-    const user = await User.findById(req.user.sub);
     const requested =
       data.gateway === "auto" || !data.gateway ? null : data.gateway;
     const gateway = resolveGateway(requested, user, {
@@ -89,17 +89,20 @@ export async function purchaseCredits(req, res, next) {
       meta: { ...packMeta, ...(charge.meta || {}) },
     });
 
-    // Always return pending for M-Pesa so B2B matches B2C: client shows
-    // "waiting for PIN", then polls until paid (callback or sandbox delay).
+    // Pending until provider confirms (M-Pesa callback / Razorpay verify).
     if (charge.status !== "paid") {
       scheduleSandboxAutoPaid(payment._id);
+      const instructions =
+        charge.gateway === "razorpay"
+          ? charge.meta?.customerMessage ||
+            "Complete payment in the Razorpay window."
+          : charge.meta?.customerMessage ||
+            "Check your phone and enter your M-Pesa PIN to complete payment.";
       return res.status(200).json({
         error: null,
         payment: serializePayment(payment),
         pending: true,
-        instructions:
-          charge.meta?.customerMessage ||
-          "Check your phone and enter your M-Pesa PIN to complete payment.",
+        instructions,
       });
     }
 

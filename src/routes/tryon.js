@@ -11,7 +11,7 @@ import {
 
 const router = Router();
 
-router.get("/pricing", listPricing);
+router.get("/pricing", optionalAuth, listPricing);
 
 // Consumer dashboard — must be registered before /:id
 router.get("/mine/stats", requireAuth, getMyStats);

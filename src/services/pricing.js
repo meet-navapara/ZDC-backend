@@ -1,6 +1,8 @@
 import { Pricing } from "../models/Pricing.js";
 import { PACKS as DEFAULT_B2C_PACKS } from "../config/pricing.js";
 import { CREDIT_PACKS as DEFAULT_CREDIT_PACKS } from "../config/credits.js";
+import { localizePackAmount } from "../config/inrPricing.js";
+import { resolveMarketGateway } from "./payments.js";
 import {
   cacheAside,
   invalidatePricing,
@@ -34,25 +36,27 @@ export async function getPricingSafe() {
   });
 }
 
-export async function getB2cPacks() {
+export async function getB2cPacks(user = null) {
   const safe = await getPricingSafe();
-  return safe.b2cPacks;
+  const currency = user ? resolveMarketGateway(user).currency : "KES";
+  return safe.b2cPacks.map((p) => localizePackAmount(p, currency));
 }
 
-export async function getCreditPacks() {
+export async function getCreditPacks(user = null) {
   const safe = await getPricingSafe();
-  return safe.creditPacks;
+  const currency = user ? resolveMarketGateway(user).currency : "KES";
+  return safe.creditPacks.map((p) => localizePackAmount(p, currency));
 }
 
 // Looks up a single B2C pack by id (DB-driven, config fallback via seed).
-export async function getPack(id) {
-  const packs = await getB2cPacks();
+export async function getPack(id, user = null) {
+  const packs = await getB2cPacks(user);
   return packs.find((p) => p.id === id) || null;
 }
 
 // Looks up a single B2B credit pack by id.
-export async function getCreditPack(id) {
-  const packs = await getCreditPacks();
+export async function getCreditPack(id, user = null) {
+  const packs = await getCreditPacks(user);
   return packs.find((p) => p.id === id) || null;
 }
 

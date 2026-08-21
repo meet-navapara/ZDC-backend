@@ -20,13 +20,15 @@ import { scheduleSandboxAutoPaid } from "../services/mpesa/sandboxAutoPaid.js";
 
 const paySchema = z.object({
   jobId: objectIdField,
-  gateway: z.enum(["stub", "mpesa", "intasend", "referral", "auto"]).optional(),
+  gateway: z
+    .enum(["stub", "mpesa", "razorpay", "intasend", "referral", "auto"])
+    .optional(),
   phone: z.string().trim().min(9).max(20).optional(),
   useFreeTryon: z.coerce.boolean().optional(),
 });
 
 export function serializePayment(payment) {
-  return {
+  const base = {
     id: payment._id.toString(),
     status: payment.status,
     reference: payment.reference,
@@ -40,6 +42,15 @@ export function serializePayment(payment) {
     customerMessage: payment.meta?.customerMessage || null,
     createdAt: payment.createdAt,
   };
+  if (payment.gateway === "razorpay") {
+    base.razorpay = {
+      keyId: payment.meta?.razorpayKeyId || null,
+      orderId:
+        payment.providerCheckoutId || payment.meta?.razorpayOrderId || null,
+      amountPaise: payment.meta?.amountPaise || null,
+    };
+  }
+  return base;
 }
 
 export async function listPaymentMethods(req, res, next) {
@@ -134,13 +145,17 @@ export async function payForJob(req, res, next) {
       // same wait/poll flow for B2C and B2B.
       if (charge.status !== "paid") {
         scheduleSandboxAutoPaid(payment._id);
+        const instructions =
+          charge.gateway === "razorpay"
+            ? charge.meta?.customerMessage ||
+              "Complete payment in the Razorpay window."
+            : charge.meta?.customerMessage ||
+              "Check your phone and enter your M-Pesa PIN to complete payment.";
         return res.status(200).json({
           error: null,
           payment: serializePayment(payment),
           pending: true,
-          instructions:
-            charge.meta?.customerMessage ||
-            "Check your phone and enter your M-Pesa PIN to complete payment.",
+          instructions,
         });
       }
     }

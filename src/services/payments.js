@@ -1,9 +1,10 @@
 // Payment provider interface.
-// Stub = instant demo pay. M-Pesa = Daraja STK when MPESA_ENABLED + credentials.
-// Razorpay = Phase 3.
+// Stub = instant demo. M-Pesa = Daraja STK. Razorpay = India Checkout (Phase 3).
 import { env } from "../config/env.js";
 import { isMpesaLive } from "./mpesa/daraja.js";
 import { MpesaProvider } from "./mpesa/provider.js";
+import { isRazorpayLive } from "./razorpay/client.js";
+import { RazorpayProvider } from "./razorpay/provider.js";
 
 class StubProvider {
   constructor() {
@@ -60,7 +61,16 @@ export function resolveMarketGateway(user) {
       country: country || "India",
       currency: "INR",
       gateway: "razorpay",
-      reason: "India / INR → Razorpay (Phase 3)",
+      reason: "India / INR → Razorpay",
+    };
+  }
+
+  if (currency === "INR") {
+    return {
+      country,
+      currency: "INR",
+      gateway: "razorpay",
+      reason: "INR → Razorpay",
     };
   }
 
@@ -73,7 +83,7 @@ export function resolveMarketGateway(user) {
 }
 
 /**
- * Pick charge gateway. KES charges (B2B packs + B2C plans) auto-route to M-Pesa when live.
+ * Pick charge gateway from market + invoice currency.
  * @param {string|null|undefined} requested
  * @param {object|null|undefined} user
  * @param {{ currency?: string|null }} [opts]
@@ -84,19 +94,12 @@ export function resolveGateway(requested, user = null, opts = {}) {
 
   const market = user ? resolveMarketGateway(user) : null;
   const mpesaLive = isMpesaLive();
+  const razorpayLive = isRazorpayLive();
   const chargeCurrency = String(
     opts.currency || market?.currency || ""
   ).toUpperCase();
 
-  // Auto: Kenya market OR any KES invoice → M-Pesa when configured
-  // (B2B credit packs are always KES even if the business profile is India/other).
-  if (
-    mpesaLive &&
-    (market?.gateway === "mpesa" || chargeCurrency === "KES")
-  ) {
-    return "mpesa";
-  }
-
+  // Explicit requests
   if (req === "mpesa") {
     if (mpesaLive) return "mpesa";
     const err = new Error("M-Pesa is not enabled");
@@ -106,14 +109,35 @@ export function resolveGateway(requested, user = null, opts = {}) {
     throw err;
   }
 
-  if (req === "intasend" || req === "razorpay") {
-    const err = new Error("That payment method is not available yet");
+  if (req === "razorpay") {
+    if (razorpayLive) return "razorpay";
+    const err = new Error("Razorpay is not enabled");
     err.status = 400;
     err.publicMessage =
-      req === "razorpay"
-        ? "Razorpay (India) ships in Phase 3. Use demo payment for now."
-        : "That payment method is no longer available.";
+      "Razorpay is not enabled yet. Set RAZORPAY_ENABLED and API keys, or use demo payment.";
     throw err;
+  }
+
+  if (req === "intasend") {
+    const err = new Error("That payment method is not available yet");
+    err.status = 400;
+    err.publicMessage = "That payment method is no longer available.";
+    throw err;
+  }
+
+  // Auto: currency / market rails
+  if (
+    razorpayLive &&
+    (market?.gateway === "razorpay" || chargeCurrency === "INR")
+  ) {
+    return "razorpay";
+  }
+
+  if (
+    mpesaLive &&
+    (market?.gateway === "mpesa" || chargeCurrency === "KES")
+  ) {
+    return "mpesa";
   }
 
   return "stub";
@@ -121,16 +145,16 @@ export function resolveGateway(requested, user = null, opts = {}) {
 
 export function getPaymentProvider(gateway = "stub") {
   if (gateway === "mpesa") return new MpesaProvider();
+  if (gateway === "razorpay") return new RazorpayProvider();
   return new StubProvider();
 }
 
 export function publicPaymentMethods(user) {
   const market = user ? resolveMarketGateway(user) : null;
   const mpesaLive = isMpesaLive();
+  const razorpayLive = isRazorpayLive();
   const methods = [];
 
-  // Phase 2: all catalog prices are KES — expose M-Pesa whenever Daraja is live,
-  // even if the business profile country is not Kenya (common B2B gap).
   if (mpesaLive) {
     methods.push({
       id: "mpesa",
@@ -138,9 +162,23 @@ export function publicPaymentMethods(user) {
       available: true,
     });
   }
+  if (razorpayLive) {
+    methods.push({
+      id: "razorpay",
+      label: "Razorpay (UPI / card)",
+      available: true,
+    });
+  }
 
-  // Demo stub always available for local/dev and when live gateway is off.
-  if (!mpesaLive || env.nodeEnv !== "production" || market?.gateway === "stub") {
+  const liveForMarket =
+    (market?.gateway === "razorpay" && razorpayLive) ||
+    (market?.gateway === "mpesa" && mpesaLive);
+
+  if (
+    !liveForMarket ||
+    env.nodeEnv !== "production" ||
+    market?.gateway === "stub"
+  ) {
     methods.push({
       id: "stub",
       label: "Demo (instant, no charge)",
@@ -157,7 +195,15 @@ export function publicPaymentMethods(user) {
   }
 
   let defaultGateway = "stub";
-  if (mpesaLive) defaultGateway = "mpesa";
+  if (market?.gateway === "razorpay" && razorpayLive) {
+    defaultGateway = "razorpay";
+  } else if (market?.gateway === "mpesa" && mpesaLive) {
+    defaultGateway = "mpesa";
+  } else if (razorpayLive && market?.currency === "INR") {
+    defaultGateway = "razorpay";
+  } else if (mpesaLive) {
+    defaultGateway = "mpesa";
+  }
 
   let paymentNotice = null;
   if (defaultGateway === "mpesa" && env.mpesa.sandboxAutoPaid) {
@@ -166,15 +212,18 @@ export function publicPaymentMethods(user) {
   } else if (defaultGateway === "mpesa") {
     paymentNotice =
       "Pay with M-Pesa: you will get an STK prompt on your phone to enter your PIN.";
+  } else if (defaultGateway === "razorpay") {
+    paymentNotice =
+      "Pay with Razorpay: UPI, card, or netbanking opens in a secure checkout window.";
   } else if (market?.gateway === "mpesa" && !mpesaLive) {
     paymentNotice =
       "Demo payment is active. M-Pesa is planned for this Kenya/KES account — enable MPESA_* on the server to go live.";
-  } else if (market?.gateway === "razorpay") {
+  } else if (market?.gateway === "razorpay" && !razorpayLive) {
     paymentNotice =
-      "Demo payment is active. Razorpay (India/INR) ships in Phase 3.";
+      "Demo payment is active. Enable RAZORPAY_* on the server for India/INR checkout.";
   } else {
     paymentNotice =
-      "Demo payment is active. Live M-Pesa (Kenya) and Razorpay (India) follow phased rollout.";
+      "Demo payment is active. Live M-Pesa (Kenya) and Razorpay (India) follow market routing.";
   }
 
   return {
@@ -182,6 +231,8 @@ export function publicPaymentMethods(user) {
     plannedGateway: market?.gateway || null,
     market,
     mpesaEnabled: mpesaLive,
+    razorpayEnabled: razorpayLive,
+    razorpayKeyId: razorpayLive ? env.razorpay.keyId : null,
     sandboxAutoPaid: Boolean(env.mpesa.sandboxAutoPaid),
     methods,
     paymentNotice,
@@ -197,7 +248,6 @@ export function nextPaymentTransition(currentStatus, verifiedStatus) {
     return { status: "paid", fulfill: false, alreadyPaid: true };
   }
   if (verifiedStatus === "paid") {
-    // Allow recovering a failed/cancelled sandbox payment into paid (auto-paid).
     return { status: "paid", fulfill: true, alreadyPaid: false };
   }
   if (verifiedStatus === "cancelled" && currentStatus === "pending") {

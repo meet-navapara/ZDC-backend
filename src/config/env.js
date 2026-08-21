@@ -136,7 +136,24 @@ export const env = {
   mockOtpCode: (process.env.MOCK_OTP_CODE || "123456").trim() || "123456",
   frontendUrl,
   mpesa: buildMpesaConfig(),
+  razorpay: buildRazorpayConfig(),
 };
+
+function buildRazorpayConfig() {
+  const enabled =
+    (process.env.RAZORPAY_ENABLED || "false").toLowerCase() === "true";
+  const keyId = (process.env.RAZORPAY_KEY_ID || "").trim();
+  const keySecret = (process.env.RAZORPAY_KEY_SECRET || "").trim();
+  const webhookSecret = (process.env.RAZORPAY_WEBHOOK_SECRET || "").trim();
+  const configured = Boolean(keyId && keySecret);
+  return {
+    enabled,
+    configured,
+    keyId,
+    keySecret,
+    webhookSecret,
+  };
+}
 
 function buildMpesaConfig() {
   const enabled =

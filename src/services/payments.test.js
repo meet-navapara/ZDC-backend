@@ -18,9 +18,14 @@ describe("resolveGateway", () => {
   it("keeps referral", () => {
     assert.equal(resolveGateway("referral"), "referral");
   });
-  it("rejects razorpay / intasend until later phases", () => {
+  it("rejects intasend; razorpay only when enabled", async () => {
     assert.throws(() => resolveGateway("intasend"), /not available/);
-    assert.throws(() => resolveGateway("razorpay"), /not available|Phase 3/);
+    const { isRazorpayLive } = await import("./razorpay/client.js");
+    if (isRazorpayLive()) {
+      assert.equal(resolveGateway("razorpay"), "razorpay");
+    } else {
+      assert.throws(() => resolveGateway("razorpay"), /not enabled/);
+    }
   });
   it("rejects explicit mpesa when not configured, else allows", async () => {
     const { isMpesaLive } = await import("./mpesa/daraja.js");
@@ -30,14 +35,21 @@ describe("resolveGateway", () => {
       assert.throws(() => resolveGateway("mpesa"), /not enabled/);
     }
   });
-  it("routes KES pack currency to mpesa when live, even for India profiles", async () => {
+  it("routes India/INR to razorpay when live, else KES pack to mpesa", async () => {
     const { isMpesaLive } = await import("./mpesa/daraja.js");
-    if (!isMpesaLive()) return;
+    const { isRazorpayLive } = await import("./razorpay/client.js");
     const india = {
       business: { currency: "INR", address: { country: "India" } },
     };
-    assert.equal(resolveGateway(null, india), "stub");
-    assert.equal(resolveGateway(null, india, { currency: "KES" }), "mpesa");
+    if (isRazorpayLive()) {
+      assert.equal(resolveGateway(null, india), "razorpay");
+      assert.equal(resolveGateway(null, india, { currency: "INR" }), "razorpay");
+    } else {
+      assert.equal(resolveGateway(null, india), "stub");
+    }
+    if (isMpesaLive()) {
+      assert.equal(resolveGateway(null, india, { currency: "KES" }), "mpesa");
+    }
   });
 });
 
@@ -67,16 +79,25 @@ describe("resolveMarketGateway", () => {
 });
 
 describe("publicPaymentMethods", () => {
-  it("exposes demo stub when mpesa offline", () => {
+  it("exposes demo stub when no live gateway matches", async () => {
+    const { isMpesaLive } = await import("./mpesa/daraja.js");
     const methods = publicPaymentMethods();
-    assert.equal(methods.defaultGateway, "stub");
-    assert.ok(methods.methods.some((m) => m.id === "stub"));
+    assert.ok(methods.methods.some((m) => m.id === "stub") || isMpesaLive());
+    if (!isMpesaLive()) {
+      assert.equal(methods.defaultGateway, "stub");
+    }
   });
   it("includes planned gateway when user provided", () => {
     const methods = publicPaymentMethods({
       business: { currency: "KES", address: { country: "Kenya" } },
     });
     assert.equal(methods.plannedGateway, "mpesa");
+  });
+  it("plans razorpay for India profiles", () => {
+    const methods = publicPaymentMethods({
+      business: { currency: "INR", address: { country: "India" } },
+    });
+    assert.equal(methods.plannedGateway, "razorpay");
   });
 });
 
