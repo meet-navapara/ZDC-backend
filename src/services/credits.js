@@ -61,6 +61,44 @@ export async function addCredits(
   return wallet.balance;
 }
 
+/** Admin refund: deduct purchased credits when balance allows. */
+export async function deductCredits(
+  businessId,
+  amount,
+  { type = "adjust", reference = null, note = null, payment = null } = {}
+) {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Credit amount must be a positive number");
+  }
+  await getOrCreateWallet(businessId);
+  const wallet = await CreditWallet.findOneAndUpdate(
+    { business: businessId, balance: { $gte: amount } },
+    { $inc: { balance: -amount } },
+    { new: true }
+  );
+  if (!wallet) {
+    const current = await getBalance(businessId);
+    const err = new Error("Insufficient credits to reverse purchase");
+    err.status = 409;
+    err.balance = current;
+    throw err;
+  }
+  await CreditLedger.create({
+    business: businessId,
+    type,
+    amount: -amount,
+    balanceAfter: wallet.balance,
+    reference,
+    note,
+    payment,
+  });
+  await Promise.all([
+    invalidateBusinessStats(businessId),
+    invalidatePlatformStats(),
+  ]);
+  return wallet.balance;
+}
+
 // Atomically consumes credits only if the balance is sufficient. Throws
 // InsufficientCreditsError otherwise. Returns the new balance.
 export async function consumeCredits(
@@ -108,9 +146,25 @@ export async function refundCredits(businessId, amount, { note = null, job = nul
   }
 }
 
-export async function listLedger(businessId, { limit = 50 } = {}) {
-  const entries = await CreditLedger.find({ business: businessId })
-    .sort({ createdAt: -1 })
-    .limit(Math.min(limit, 200));
-  return entries.map((e) => e.toJSONSafe());
+export async function listLedger(businessId, { limit = 50, page = 1 } = {}) {
+  const safeLimit = Math.min(Math.max(1, limit), 200);
+  const safePage = Math.max(1, page);
+  const skip = (safePage - 1) * safeLimit;
+  const filter = { business: businessId };
+
+  const [entries, total] = await Promise.all([
+    CreditLedger.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(safeLimit),
+    CreditLedger.countDocuments(filter),
+  ]);
+
+  return {
+    entries: entries.map((e) => e.toJSONSafe()),
+    total,
+    page: safePage,
+    limit: safeLimit,
+    totalPages: Math.max(1, Math.ceil(total / safeLimit)),
+  };
 }

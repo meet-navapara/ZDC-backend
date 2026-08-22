@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { upload } from "../middleware/upload.js";
-import { requireAuth, requireRole, requireActiveAccount } from "../middleware/auth.js";
+import { requireAuth, requireRole, requireActiveAccount, optionalAuth } from "../middleware/auth.js";
 import {
   registerBusiness,
   getProfile,
@@ -47,7 +47,7 @@ router.post("/register/otp/request", authLimiter, requestB2bSignupOtp);
 router.post("/register/otp/verify", authLimiter, verifyB2bSignupOtp);
 // Legacy direct register (kept for scripts); prefer OTP endpoints above
 router.post("/register", authLimiter, registerBusiness);
-router.get("/credits/packs", listCreditPacks);
+router.get("/credits/packs", optionalAuth, listCreditPacks);
 
 // Everything below requires an active B2B account (suspended/pending blocked).
 const b2b = [requireAuth, requireRole("b2b"), requireActiveAccount];

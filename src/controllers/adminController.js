@@ -7,7 +7,7 @@ import { TryonJob } from "../models/TryonJob.js";
 import { Payment, PAYMENT_STATUSES } from "../models/Payment.js";
 import { CreditWallet } from "../models/CreditWallet.js";
 import { CreditLedger } from "../models/CreditLedger.js";
-import { getBalance } from "../services/credits.js";
+import { getBalance, deductCredits } from "../services/credits.js";
 import { getPricingSafe, updatePricing } from "../services/pricing.js";
 import { getContentSafe, updateContent } from "../services/siteContent.js";
 import { buildPlatformStats } from "../services/platformStats.js";
@@ -237,7 +237,49 @@ export async function listAudit(req, res, next) {
 /* ------------------------------- Payments -------------------------------- */
 
 const PAYMENT_PURPOSES = ["b2c_tryon", "b2b_credits"];
-const PAYMENT_GATEWAYS = ["stub", "mpesa", "intasend", "referral"];
+const PAYMENT_GATEWAYS = ["stub", "mpesa", "razorpay", "intasend", "referral"];
+
+const SUMMARY_STATUSES = ["paid", "pending", "failed", "cancelled", "refunded"];
+
+function emptyAmountBucket() {
+  return { count: 0, amount: 0 };
+}
+
+/** Build per-status totals split by KES / INR for admin dashboard. */
+function buildPaymentSummary(summaryRows) {
+  const byCurrency = {
+    KES: Object.fromEntries(SUMMARY_STATUSES.map((s) => [s, emptyAmountBucket()])),
+    INR: Object.fromEntries(SUMMARY_STATUSES.map((s) => [s, emptyAmountBucket()])),
+  };
+
+  for (const row of summaryRows) {
+    const status = row._id?.status;
+    const cur = String(row._id?.currency || "KES").toUpperCase();
+    const bucket = cur === "INR" ? byCurrency.INR : byCurrency.KES;
+    if (status && bucket[status]) {
+      bucket[status] = { count: row.count, amount: row.amount };
+    }
+  }
+
+  function statusSummary(status) {
+    const kes = byCurrency.KES[status];
+    const inr = byCurrency.INR[status];
+    return {
+      kes,
+      inr,
+      totalCount: kes.count + inr.count,
+    };
+  }
+
+  return {
+    byCurrency,
+    paid: statusSummary("paid"),
+    pending: statusSummary("pending"),
+    failed: statusSummary("failed"),
+    cancelled: statusSummary("cancelled"),
+    refunded: statusSummary("refunded"),
+  };
+}
 
 // Paginated, filterable payment ledger with a summary for the current filter.
 // Powers the Super Admin "Payment monitoring" view. Data comes straight from
@@ -286,7 +328,10 @@ export async function listPayments(req, res, next) {
         { $match: filter },
         {
           $group: {
-            _id: "$status",
+            _id: {
+              status: "$status",
+              currency: { $ifNull: ["$currency", "KES"] },
+            },
             count: { $sum: 1 },
             amount: { $sum: "$amount" },
           },
@@ -294,19 +339,7 @@ export async function listPayments(req, res, next) {
       ]),
     ]);
 
-    const summary = {
-      currency: "KES",
-      paid: { count: 0, amount: 0 },
-      pending: { count: 0, amount: 0 },
-      failed: { count: 0, amount: 0 },
-      cancelled: { count: 0, amount: 0 },
-      refunded: { count: 0, amount: 0 },
-    };
-    for (const row of summaryRows) {
-      if (summary[row._id]) {
-        summary[row._id] = { count: row.count, amount: row.amount };
-      }
-    }
+    const summary = buildPaymentSummary(summaryRows);
 
     const rows = payments.map((p) => ({
       id: String(p._id),
@@ -346,19 +379,99 @@ export async function listPayments(req, res, next) {
 export async function refundPayment(req, res, next) {
   try {
     const id = objectIdField.parse(req.params.id);
+    const data = refundSchema.parse(req.body || {});
+
     const payment = await Payment.findById(id);
     if (!payment) {
       return res.status(404).json({ error: "Payment not found" });
     }
     if (payment.status === "refunded") {
-      return res.json({ payment: { id: String(payment._id), status: payment.status } });
+      return res.json({
+        payment: {
+          id: String(payment._id),
+          status: payment.status,
+          amount: payment.amount,
+          currency: payment.currency,
+        },
+      });
     }
     if (payment.status !== "paid") {
       return res.status(409).json({ error: "Only paid payments can be refunded" });
     }
-    return res.status(400).json({
-      error:
-        "Online refunds are not available. Mark refunds manually until a payment provider is configured.",
+
+    if (
+      payment.purpose === "b2b_credits" &&
+      data.reverseCredits !== false
+    ) {
+      const credits = Number(payment.meta?.credits || 0);
+      if (credits > 0) {
+        try {
+          await deductCredits(payment.user, credits, {
+            type: "adjust",
+            reference: payment.reference,
+            note: data.reason
+              ? `Refund: ${data.reason}`
+              : "Admin refund — credits reversed",
+            payment: payment._id,
+          });
+        } catch (err) {
+          if (err.status === 409) {
+            return res.status(409).json({
+              error:
+                "Cannot refund — business has already spent part of these credits. Adjust manually or disable credit reversal.",
+              balance: err.balance,
+              creditsToReverse: credits,
+            });
+          }
+          throw err;
+        }
+      }
+    }
+
+    const updated = await Payment.findOneAndUpdate(
+      { _id: payment._id, status: "paid" },
+      {
+        $set: {
+          status: "refunded",
+          meta: {
+            ...(payment.meta || {}),
+            refundReason: data.reason || null,
+            refundedAt: new Date(),
+            refundedBy: req.user.sub,
+            creditsReversed:
+              payment.purpose === "b2b_credits" && data.reverseCredits !== false,
+          },
+        },
+      },
+      { new: true }
+    );
+    if (!updated) {
+      return res.status(409).json({ error: "Payment was already updated" });
+    }
+
+    await recordAudit(req, {
+      action: "payment.refunded",
+      targetType: "payment",
+      targetId: String(updated._id),
+      targetLabel: updated.reference || String(updated._id),
+      meta: {
+        amount: updated.amount,
+        currency: updated.currency,
+        purpose: updated.purpose,
+        reason: data.reason || null,
+      },
+    });
+
+    return res.json({
+      payment: {
+        id: String(updated._id),
+        status: updated.status,
+        amount: updated.amount,
+        currency: updated.currency,
+        gateway: updated.gateway,
+        purpose: updated.purpose,
+        reference: updated.reference,
+      },
     });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -611,6 +724,8 @@ export async function getPricing(req, res, next) {
   }
 }
 
+const packInrField = z.number().min(0).max(MAX_PRICE).optional().nullable();
+
 const pricingSchema = z.object({
   b2cPacks: z
     .array(
@@ -620,6 +735,7 @@ const pricingSchema = z.object({
         images: z.number().int().min(1).max(100),
         amount: z.number().min(0).max(MAX_PRICE),
         currency: currencyField.default("KES"),
+        amountInr: packInrField,
       })
     )
     .min(1, "At least one B2C pack is required")
@@ -632,10 +748,16 @@ const pricingSchema = z.object({
         credits: z.number().int().min(1).max(MAX_CREDITS),
         amount: z.number().min(0).max(MAX_PRICE),
         currency: currencyField.default("KES"),
+        amountInr: packInrField,
       })
     )
     .min(1, "At least one credit pack is required")
     .max(20, "Too many packs"),
+});
+
+const refundSchema = z.object({
+  reason: boundedText(500).optional(),
+  reverseCredits: z.boolean().optional().default(true),
 });
 
 function hasDuplicateIds(arr) {

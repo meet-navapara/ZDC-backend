@@ -134,9 +134,14 @@ export const env = {
   // When true, signup OTP skips SMTP and always uses MOCK_OTP_CODE (shown in UI).
   otpMock: (process.env.OTP_MOCK || "true").toLowerCase() === "true",
   mockOtpCode: (process.env.MOCK_OTP_CODE || "123456").trim() || "123456",
+  // When true (default follows OTP_MOCK), outbound mail is logged only — no SMTP send.
+  emailMock:
+    (process.env.EMAIL_MOCK ?? process.env.OTP_MOCK ?? "true").toLowerCase() ===
+    "true",
   frontendUrl,
   mpesa: buildMpesaConfig(),
   razorpay: buildRazorpayConfig(),
+  perfectcorp: buildPerfectCorpConfig(),
 };
 
 function buildRazorpayConfig() {
@@ -152,6 +157,47 @@ function buildRazorpayConfig() {
     keyId,
     keySecret,
     webhookSecret,
+  };
+}
+
+function buildPerfectCorpConfig() {
+  const apiKey = (process.env.PERFECTCORP_API_KEY || "").trim();
+  const enabled =
+    (process.env.PERFECTCORP_ENABLED || "true").toLowerCase() === "true" &&
+    Boolean(apiKey);
+  return {
+    enabled,
+    apiKey,
+    baseUrl: (
+      process.env.PERFECTCORP_BASE_URL || "https://yce-api-01.makeupar.com"
+    ).replace(/\/+$/, ""),
+    /** cloth API: upper_body | lower_body | full_body */
+    garmentCategory: (
+      process.env.PERFECTCORP_GARMENT_CATEGORY || "upper_body"
+    ).trim(),
+    changeShoes:
+      (process.env.PERFECTCORP_CHANGE_SHOES || "false").toLowerCase() ===
+      "true",
+    /** cloth | hair | haircolor | beard */
+    defaultFeature: (
+      process.env.PERFECTCORP_FEATURE || "cloth"
+    ).trim(),
+    /** haircolor: preset name from YouCam catalog */
+    hairColorPreset: (
+      process.env.PERFECTCORP_HAIR_COLOR_PRESET || "Honey Blonde"
+    ).trim(),
+    /** beard: default template_id (server-side; B2C users do not pick) */
+    beardTemplateId: (
+      process.env.PERFECTCORP_BEARD_TEMPLATE_ID || "all_anchor"
+    ).trim(),
+    pollIntervalMs: Math.max(
+      1000,
+      parseInt(process.env.PERFECTCORP_POLL_MS || "3000", 10) || 3000
+    ),
+    pollMaxAttempts: Math.max(
+      10,
+      parseInt(process.env.PERFECTCORP_POLL_MAX || "90", 10) || 90
+    ),
   };
 }
 

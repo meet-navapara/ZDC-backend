@@ -23,8 +23,8 @@ class StubProvider {
 }
 
 /**
- * Infer billing country + currency from a User document (B2B business profile,
- * or future B2C fields).
+ * Infer billing country + currency from a User document
+ * (B2B business profile or B2C country/currency fields).
  *
  * @param {object|null|undefined} user
  * @returns {{ country: string|null, currency: string, gateway: "mpesa"|"razorpay"|"stub", reason: string }}
@@ -153,6 +153,7 @@ export function publicPaymentMethods(user) {
   const market = user ? resolveMarketGateway(user) : null;
   const mpesaLive = isMpesaLive();
   const razorpayLive = isRazorpayLive();
+  const isB2c = !user || user.role === "b2c";
   const methods = [];
 
   if (mpesaLive) {
@@ -160,6 +161,7 @@ export function publicPaymentMethods(user) {
       id: "mpesa",
       label: "M-Pesa (STK Push)",
       available: true,
+      currency: "KES",
     });
   }
   if (razorpayLive) {
@@ -167,8 +169,13 @@ export function publicPaymentMethods(user) {
       id: "razorpay",
       label: "Razorpay (UPI / card)",
       available: true,
+      currency: "INR",
     });
   }
+
+  const liveCount = [mpesaLive, razorpayLive].filter(Boolean).length;
+  // B2C and B2B: pick gateway when both live (not locked to registration country).
+  const allowGatewayChoice = liveCount >= 2;
 
   const liveForMarket =
     (market?.gateway === "razorpay" && razorpayLive) ||
@@ -177,13 +184,16 @@ export function publicPaymentMethods(user) {
   if (
     !liveForMarket ||
     env.nodeEnv !== "production" ||
-    market?.gateway === "stub"
+    market?.gateway === "stub" ||
+    allowGatewayChoice
   ) {
-    methods.push({
-      id: "stub",
-      label: "Demo (instant, no charge)",
-      available: true,
-    });
+    if (env.nodeEnv !== "production" || !liveCount) {
+      methods.push({
+        id: "stub",
+        label: "Demo (instant, no charge)",
+        available: true,
+      });
+    }
   }
 
   if (!methods.length) {
@@ -195,7 +205,12 @@ export function publicPaymentMethods(user) {
   }
 
   let defaultGateway = "stub";
-  if (market?.gateway === "razorpay" && razorpayLive) {
+  if (allowGatewayChoice) {
+    // Prefer market hint, else M-Pesa, else Razorpay.
+    if (market?.gateway === "razorpay" && razorpayLive) defaultGateway = "razorpay";
+    else if (mpesaLive) defaultGateway = "mpesa";
+    else if (razorpayLive) defaultGateway = "razorpay";
+  } else if (market?.gateway === "razorpay" && razorpayLive) {
     defaultGateway = "razorpay";
   } else if (market?.gateway === "mpesa" && mpesaLive) {
     defaultGateway = "mpesa";
@@ -203,10 +218,15 @@ export function publicPaymentMethods(user) {
     defaultGateway = "razorpay";
   } else if (mpesaLive) {
     defaultGateway = "mpesa";
+  } else if (razorpayLive) {
+    defaultGateway = "razorpay";
   }
 
   let paymentNotice = null;
-  if (defaultGateway === "mpesa" && env.mpesa.sandboxAutoPaid) {
+  if (allowGatewayChoice) {
+    paymentNotice =
+      "Choose how to pay: M-Pesa (Kenya / KES) or Razorpay (India / INR).";
+  } else if (defaultGateway === "mpesa" && env.mpesa.sandboxAutoPaid) {
     paymentNotice =
       "Sandbox auto-pay is ON — payment confirms in a few seconds without PIN (local testing only).";
   } else if (defaultGateway === "mpesa") {
@@ -232,8 +252,10 @@ export function publicPaymentMethods(user) {
     market,
     mpesaEnabled: mpesaLive,
     razorpayEnabled: razorpayLive,
+    allowGatewayChoice,
     razorpayKeyId: razorpayLive ? env.razorpay.keyId : null,
     sandboxAutoPaid: Boolean(env.mpesa.sandboxAutoPaid),
+    mpesaSandbox: env.mpesa.env === "sandbox",
     methods,
     paymentNotice,
   };

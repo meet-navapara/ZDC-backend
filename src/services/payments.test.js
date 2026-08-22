@@ -35,11 +35,14 @@ describe("resolveGateway", () => {
       assert.throws(() => resolveGateway("mpesa"), /not enabled/);
     }
   });
-  it("routes India/INR to razorpay when live, else KES pack to mpesa", async () => {
+  it("routes India/INR to razorpay when live; Kenya/KES to mpesa", async () => {
     const { isMpesaLive } = await import("./mpesa/daraja.js");
     const { isRazorpayLive } = await import("./razorpay/client.js");
     const india = {
       business: { currency: "INR", address: { country: "India" } },
+    };
+    const kenya = {
+      business: { currency: "KES", address: { country: "Kenya" } },
     };
     if (isRazorpayLive()) {
       assert.equal(resolveGateway(null, india), "razorpay");
@@ -48,7 +51,8 @@ describe("resolveGateway", () => {
       assert.equal(resolveGateway(null, india), "stub");
     }
     if (isMpesaLive()) {
-      assert.equal(resolveGateway(null, india, { currency: "KES" }), "mpesa");
+      assert.equal(resolveGateway(null, kenya), "mpesa");
+      assert.equal(resolveGateway(null, kenya, { currency: "KES" }), "mpesa");
     }
   });
 });
@@ -70,11 +74,13 @@ describe("resolveMarketGateway", () => {
   it("routes KES without country to mpesa", () => {
     assert.equal(resolveMarketGateway({ currency: "KES" }).gateway, "mpesa");
   });
-  it("keeps unsupported markets on stub", () => {
+  it("routes B2C top-level India + INR to razorpay", () => {
     const m = resolveMarketGateway({
-      business: { currency: "UGX", address: { country: "Uganda" } },
+      country: "India",
+      currency: "INR",
     });
-    assert.equal(m.gateway, "stub");
+    assert.equal(m.gateway, "razorpay");
+    assert.equal(m.currency, "INR");
   });
 });
 

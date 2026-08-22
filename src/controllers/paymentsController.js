@@ -17,6 +17,8 @@ import {
 } from "../services/mpesa/daraja.js";
 import { applyVerifiedPayment } from "../services/mpesa/fulfill.js";
 import { scheduleSandboxAutoPaid } from "../services/mpesa/sandboxAutoPaid.js";
+import { getPackBase } from "../services/pricing.js";
+import { packAmountForGateway } from "../config/inrPricing.js";
 
 const paySchema = z.object({
   jobId: objectIdField,
@@ -109,8 +111,24 @@ export async function payForJob(req, res, next) {
     } else {
       const requested =
         data.gateway === "auto" || !data.gateway ? null : data.gateway;
+
+      // B2C: honor explicit gateway choice and price the job in that rail’s currency.
+      let chargeCurrency = job.currency;
+      let chargeAmount = job.amount;
+      if (requested === "mpesa" || requested === "razorpay") {
+        const basePack = job.pack ? await getPackBase(job.pack) : null;
+        if (basePack) {
+          const priced = packAmountForGateway(basePack, requested);
+          chargeAmount = priced.amount;
+          chargeCurrency = priced.currency;
+          job.amount = chargeAmount;
+          job.currency = chargeCurrency;
+          await job.save();
+        }
+      }
+
       const gateway = resolveGateway(requested, user, {
-        currency: job.currency,
+        currency: chargeCurrency,
       });
       const provider = getPaymentProvider(gateway);
       const phone =
@@ -120,8 +138,8 @@ export async function payForJob(req, res, next) {
         null;
 
       const charge = await provider.createCharge({
-        amount: job.amount,
-        currency: job.currency,
+        amount: chargeAmount,
+        currency: chargeCurrency,
         reference: `job_${job._id}`,
         phone,
         description: "zimji try-on",
@@ -131,8 +149,8 @@ export async function payForJob(req, res, next) {
         user: req.user.sub,
         job: job._id,
         gateway: charge.gateway,
-        amount: job.amount,
-        currency: job.currency,
+        amount: chargeAmount,
+        currency: chargeCurrency,
         purpose: "b2c_tryon",
         status: charge.status,
         reference: charge.reference,

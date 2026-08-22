@@ -7,11 +7,15 @@ import {
   listPricing,
   listMyJobs,
   getMyStats,
+  listPerfectCorpOptions,
+  proxyPerfectCorpThumbnail,
 } from "../controllers/tryonController.js";
 
 const router = Router();
 
 router.get("/pricing", optionalAuth, listPricing);
+router.get("/perfectcorp/options", listPerfectCorpOptions);
+router.get("/perfectcorp/thumbnail", proxyPerfectCorpThumbnail);
 
 // Consumer dashboard — must be registered before /:id
 router.get("/mine/stats", requireAuth, getMyStats);

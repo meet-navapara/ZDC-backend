@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 const { Schema } = mongoose;
 
-export const OTP_PURPOSES = ["signup_b2c", "signup_b2b"];
+export const OTP_PURPOSES = ["signup_b2c", "signup_b2b", "password_reset"];
 
 const emailOtpSchema = new Schema(
   {

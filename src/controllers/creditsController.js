@@ -1,8 +1,11 @@
 import { z } from "zod";
-import { getCreditPacks, getCreditPack } from "../services/pricing.js";
+import { getCreditPacks, getCreditPack, getCreditPacksDual, getCreditPackBase } from "../services/pricing.js";
 import { Payment } from "../models/Payment.js";
 import { User } from "../models/User.js";
 import { getPaymentProvider, resolveGateway } from "../services/payments.js";
+import { isMpesaLive } from "../services/mpesa/daraja.js";
+import { isRazorpayLive } from "../services/razorpay/client.js";
+import { packAmountForGateway } from "../config/inrPricing.js";
 import { addCredits, getBalance, listLedger } from "../services/credits.js";
 import { capture } from "../services/analytics.js";
 import { buildCreditInvoicePdf, invoiceContextForPayment } from "../services/invoice.js";
@@ -12,9 +15,13 @@ import { scheduleSandboxAutoPaid } from "../services/mpesa/sandboxAutoPaid.js";
 
 export async function listCreditPacks(req, res, next) {
   try {
-    const user = req.user?.sub ? await User.findById(req.user.sub) : null;
-    const packs = await getCreditPacks(user);
-    return res.json({ packs });
+    const dualPrices = isMpesaLive() && isRazorpayLive();
+    const packs = dualPrices
+      ? await getCreditPacksDual()
+      : await getCreditPacks(
+          req.user?.sub ? await User.findById(req.user.sub) : null
+        );
+    return res.json({ packs, dualPrices });
   } catch (err) {
     return next(err);
   }
@@ -32,8 +39,15 @@ export async function getWallet(req, res, next) {
 export async function getLedger(req, res, next) {
   try {
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || "50", 10) || 50));
-    const entries = await listLedger(req.user.sub, { limit });
-    return res.json({ ledger: entries });
+    const page = Math.max(1, parseInt(req.query.page || "1", 10) || 1);
+    const result = await listLedger(req.user.sub, { limit, page });
+    return res.json({
+      ledger: result.entries,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+    });
   } catch (err) {
     return next(err);
   }
@@ -55,8 +69,20 @@ export async function purchaseCredits(req, res, next) {
     }
     const requested =
       data.gateway === "auto" || !data.gateway ? null : data.gateway;
+
+    let chargeAmount = pack.amount;
+    let chargeCurrency = pack.currency;
+    if (requested === "mpesa" || requested === "razorpay") {
+      const basePack = await getCreditPackBase(data.pack);
+      if (basePack) {
+        const priced = packAmountForGateway(basePack, requested);
+        chargeAmount = priced.amount;
+        chargeCurrency = priced.currency;
+      }
+    }
+
     const gateway = resolveGateway(requested, user, {
-      currency: pack.currency,
+      currency: chargeCurrency,
     });
     const packMeta = {
       packId: pack.id,
@@ -69,8 +95,8 @@ export async function purchaseCredits(req, res, next) {
       data.phone || user?.phone || user?.business?.whatsapp || null;
 
     const charge = await provider.createCharge({
-      amount: pack.amount,
-      currency: pack.currency,
+      amount: chargeAmount,
+      currency: chargeCurrency,
       reference: `credits_${data.pack}_${Date.now()}`.slice(0, 40),
       phone,
       description: "zimji credits",
@@ -79,8 +105,8 @@ export async function purchaseCredits(req, res, next) {
     const payment = await Payment.create({
       user: req.user.sub,
       gateway: charge.gateway,
-      amount: pack.amount,
-      currency: pack.currency,
+      amount: chargeAmount,
+      currency: chargeCurrency,
       purpose: "b2b_credits",
       status: charge.status,
       reference: charge.reference,

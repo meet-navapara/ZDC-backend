@@ -1,6 +1,13 @@
 import crypto from "crypto";
 import { env } from "../../config/env.js";
 
+function timingSafeEqualHex(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+}
+
 export function isRazorpayLive() {
   return Boolean(env.razorpay.enabled && env.razorpay.configured);
 }
@@ -80,7 +87,7 @@ export function verifyPaymentSignature({
     .createHmac("sha256", env.razorpay.keySecret)
     .update(payload)
     .digest("hex");
-  return expected === signature;
+  return timingSafeEqualHex(expected, signature);
 }
 
 export function verifyWebhookSignature(rawBody, signature) {
@@ -89,7 +96,7 @@ export function verifyWebhookSignature(rawBody, signature) {
     .createHmac("sha256", env.razorpay.webhookSecret)
     .update(rawBody)
     .digest("hex");
-  return expected === signature;
+  return timingSafeEqualHex(expected, signature);
 }
 
 export async function fetchPayment(paymentId) {

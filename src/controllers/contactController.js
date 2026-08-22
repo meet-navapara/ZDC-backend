@@ -64,13 +64,13 @@ export async function submitContact(req, res, next) {
       </div>
     `;
 
-    if (!isMailConfigured() && env.isProd) {
+    if (!isMailConfigured() && env.isProd && !env.emailMock) {
       return res.status(503).json({
         error: "Contact is temporarily unavailable. Please email us directly.",
       });
     }
 
-    await sendMail({
+    const mailResult = await sendMail({
       to,
       replyTo: data.email,
       subject: `[zimji] ${data.inquiryType} — ${data.name}`,
@@ -78,7 +78,10 @@ export async function submitContact(req, res, next) {
       html,
     });
 
-    return res.json({ ok: true });
+    return res.json({
+      ok: true,
+      mock: Boolean(mailResult.mock),
+    });
   } catch (err) {
     if (err instanceof z.ZodError) {
       return res.status(400).json({

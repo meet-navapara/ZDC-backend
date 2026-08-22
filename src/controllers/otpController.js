@@ -45,6 +45,8 @@ const b2cRequestSchema = z.object({
   firstName: optionalText(LIMITS.name),
   lastName: optionalText(LIMITS.name),
   phone: phoneField,
+  country: optionalText(LIMITS.country),
+  currency: currencyField.optional().or(z.literal("")),
   referralCode: z
     .string()
     .trim()
@@ -102,6 +104,8 @@ export async function requestB2cSignupOtp(req, res, next) {
         firstName: data.firstName,
         lastName: data.lastName,
         phone: data.phone,
+        country: data.country,
+        currency: data.currency,
         role: "b2c",
         referralCode: referralCode || null,
       },
@@ -143,6 +147,8 @@ export async function verifyB2cSignupOtp(req, res, next) {
       firstName: payload.firstName,
       lastName: payload.lastName,
       phone: payload.phone,
+      country: payload.country || null,
+      currency: payload.currency || null,
       emailVerified: true,
       status: "active",
       freeTryons: 0,

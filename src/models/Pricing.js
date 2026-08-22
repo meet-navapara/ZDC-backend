@@ -10,6 +10,7 @@ const b2cPackSchema = new Schema(
     images: { type: Number, required: true, min: 1 },
     amount: { type: Number, required: true, min: 0 },
     currency: { type: String, default: "KES" },
+    amountInr: { type: Number, min: 0, default: null },
   },
   { _id: false }
 );
@@ -22,6 +23,7 @@ const creditPackSchema = new Schema(
     credits: { type: Number, required: true, min: 1 },
     amount: { type: Number, required: true, min: 0 },
     currency: { type: String, default: "KES" },
+    amountInr: { type: Number, min: 0, default: null },
   },
   { _id: false }
 );
@@ -45,6 +47,7 @@ pricingSchema.methods.toJSONSafe = function toJSONSafe() {
       images: p.images,
       amount: p.amount,
       currency: p.currency,
+      amountInr: p.amountInr ?? null,
     })),
     creditPacks: this.creditPacks.map((p) => ({
       id: p.id,
@@ -52,6 +55,7 @@ pricingSchema.methods.toJSONSafe = function toJSONSafe() {
       credits: p.credits,
       amount: p.amount,
       currency: p.currency,
+      amountInr: p.amountInr ?? null,
     })),
     updatedAt: this.updatedAt,
   };

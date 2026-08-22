@@ -67,6 +67,7 @@ Events: `payment.captured`, `payment.failed`.
 
 ## Notes
 
+- B2C India: set country/currency at personal signup or in **Settings** — try-on packs then show INR and Razorpay Checkout.
 - Do not commit live secrets; set them only in Vercel env.
 - Test keys use `rzp_test_`; live keys use `rzp_live_`.
-- B2C India routing needs a future country/currency on the consumer profile; B2B India works now via business profile.
+- B2B India works via business profile country + currency.

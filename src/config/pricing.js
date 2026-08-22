@@ -1,7 +1,7 @@
 // B2C pack pricing. Values are placeholders and are configurable by Super Admin later.
 export const PACKS = [
-  { id: "single", label: "Single", images: 1, amount: 20, currency: "KES" },
-  { id: "trio", label: "Trio", images: 3, amount: 50, currency: "KES" },
+  { id: "single", label: "Single", images: 1, amount: 20, currency: "KES", amountInr: 49 },
+  { id: "trio", label: "Trio", images: 3, amount: 50, currency: "KES", amountInr: 99 },
 ];
 
 export function getPack(id) {

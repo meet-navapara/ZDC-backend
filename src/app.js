@@ -14,6 +14,7 @@ import b2bRoutes from "./routes/b2b.js";
 import adminRoutes from "./routes/admin.js";
 import contentRoutes from "./routes/content.js";
 import contactRoutes from "./routes/contact.js";
+import { razorpayWebhook } from "./controllers/razorpayController.js";
 import { apiLimiter } from "./middleware/rateLimit.js";
 import { notFound, errorHandler } from "./middleware/error.js";
 
@@ -55,6 +56,13 @@ export function createApp() {
     },
     express.static(LOCAL_UPLOAD_DIR)
   );
+  // Razorpay webhook needs the raw body for HMAC — register before express.json().
+  app.post(
+    "/api/payments/razorpay/webhook",
+    express.raw({ type: "application/json", limit: "100kb" }),
+    razorpayWebhook
+  );
+
   // JSON bodies are small forms only (image uploads go through multer/multipart),
   // so cap the JSON payload tightly to reject abusive requests early.
   app.use(express.json({ limit: "100kb" }));

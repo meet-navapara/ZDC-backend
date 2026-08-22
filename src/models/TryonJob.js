@@ -33,6 +33,10 @@ const tryonJobSchema = new Schema(
     status: { type: String, enum: JOB_STATUSES, default: "awaiting_payment" },
     payment: { type: Schema.Types.ObjectId, ref: "Payment", default: null },
     perfectcorpRef: { type: String, default: null },
+    /** cloth | hair | haircolor | beard — overrides env PERFECTCORP_FEATURE */
+    perfectcorpFeature: { type: String, default: null },
+    perfectcorpPreset: { type: String, default: null },
+    perfectcorpTemplateId: { type: String, default: null },
     deliverTo: {
       email: { type: String, default: null },
       whatsapp: { type: String, default: null },
@@ -65,6 +69,7 @@ tryonJobSchema.methods.toJSONSafe = function toJSONSafe() {
         : [],
     resultImageUrls: this.resultImageUrls,
     status: this.status,
+    error: this.error || null,
     createdAt: this.createdAt,
   };
 };

@@ -9,6 +9,7 @@ export const AUDIT_ACTIONS = [
   "user.deleted",
   "pricing.updated",
   "content.updated",
+  "payment.refunded",
 ];
 
 const auditLogSchema = new Schema(

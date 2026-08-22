@@ -22,6 +22,40 @@ export function localizePackAmount(pack, currency) {
   }
   const id = pack.id;
   const inr =
-    B2C_INR_AMOUNTS[id] ?? CREDIT_INR_AMOUNTS[id] ?? pack.amount;
+    pack.amountInr ??
+    B2C_INR_AMOUNTS[id] ??
+    CREDIT_INR_AMOUNTS[id] ??
+    pack.amount;
   return { ...pack, amount: inr, currency: "INR" };
+}
+
+/** Dual-currency display for B2C gateway choice (KES + INR). */
+export function withDualPrices(pack) {
+  if (!pack) return pack;
+  const kes = localizePackAmount(pack, "KES");
+  const inr = localizePackAmount(pack, "INR");
+  return {
+    ...kes,
+    amountKes: kes.amount,
+    amountInr: inr.amount,
+    prices: {
+      KES: { amount: kes.amount, currency: "KES" },
+      INR: { amount: inr.amount, currency: "INR" },
+    },
+  };
+}
+
+/** Amount + currency for a chosen gateway. */
+export function packAmountForGateway(pack, gateway) {
+  if (!pack) return { amount: 0, currency: "KES" };
+  if (gateway === "razorpay") {
+    return localizePackAmount(pack, "INR");
+  }
+  if (gateway === "mpesa") {
+    return localizePackAmount(pack, "KES");
+  }
+  return {
+    amount: pack.amount,
+    currency: pack.currency || "KES",
+  };
 }

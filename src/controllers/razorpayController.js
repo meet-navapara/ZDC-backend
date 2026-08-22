@@ -5,6 +5,7 @@ import {
   fetchPayment,
   verifyPaymentSignature,
   verifyWebhookSignature,
+  toPaise,
 } from "../services/razorpay/client.js";
 import { objectIdField } from "../utils/validators.js";
 import { serializePayment } from "./paymentsController.js";
@@ -42,6 +43,21 @@ export async function razorpayVerify(req, res, next) {
     });
     if (!ok) {
       return res.status(400).json({ error: "Invalid payment signature" });
+    }
+
+    let rpPayment;
+    try {
+      rpPayment = await fetchPayment(data.razorpay_payment_id);
+    } catch (fetchErr) {
+      console.warn("[razorpay] verify fetch failed:", fetchErr?.message || fetchErr);
+      return res.status(502).json({ error: "Could not confirm payment with Razorpay" });
+    }
+    if (rpPayment.status !== "captured") {
+      return res.status(400).json({ error: "Payment not captured" });
+    }
+    const expectedPaise = toPaise(payment.amount);
+    if (Number(rpPayment.amount) !== expectedPaise) {
+      return res.status(400).json({ error: "Payment amount mismatch" });
     }
 
     await applyVerifiedPayment(payment, "paid", {

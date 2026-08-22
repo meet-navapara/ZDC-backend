@@ -16,26 +16,62 @@ import { capture } from "../analytics.js";
 export async function applyVerifiedPayment(payment, verifiedStatus, extra = {}) {
   const transition = nextPaymentTransition(payment.status, verifiedStatus);
 
-  if (transition.status !== payment.status) {
-    payment.status = transition.status;
+  if (transition.alreadyPaid) {
+    return { payment, fulfilled: false, alreadyPaid: true };
   }
-  if (extra.failureReason && transition.status !== "paid") {
-    payment.failureReason = String(extra.failureReason).slice(0, 500);
-  }
-  if (transition.status === "paid") {
-    payment.failureReason = null;
-  }
+
+  const paidPatch = {
+    status: transition.status,
+    failureReason:
+      transition.status === "paid"
+        ? null
+        : extra.failureReason
+          ? String(extra.failureReason).slice(0, 500)
+          : payment.failureReason,
+  };
   if (extra.mpesaReceiptNumber) {
-    payment.reference = extra.mpesaReceiptNumber;
+    paidPatch.reference = extra.mpesaReceiptNumber;
   }
   if (extra.meta) {
-    payment.meta = { ...(payment.meta || {}), ...extra.meta };
+    paidPatch.meta = { ...(payment.meta || {}), ...extra.meta };
   }
-  await payment.save();
 
-  if (!transition.fulfill) {
-    return { payment, fulfilled: false, alreadyPaid: transition.alreadyPaid };
+  if (transition.fulfill) {
+    const claimed = await Payment.findOneAndUpdate(
+      { _id: payment._id, status: { $nin: ["paid", "refunded"] } },
+      { $set: paidPatch },
+      { new: true }
+    );
+    if (!claimed) {
+      const fresh = await Payment.findById(payment._id);
+      return {
+        payment: fresh || payment,
+        fulfilled: false,
+        alreadyPaid: fresh?.status === "paid",
+      };
+    }
+    payment = claimed;
+  } else if (transition.status !== payment.status || extra.failureReason || extra.meta) {
+    payment.status = transition.status;
+    if (extra.failureReason && transition.status !== "paid") {
+      payment.failureReason = String(extra.failureReason).slice(0, 500);
+    }
+    if (transition.status === "paid") {
+      payment.failureReason = null;
+    }
+    if (extra.mpesaReceiptNumber) {
+      payment.reference = extra.mpesaReceiptNumber;
+    }
+    if (extra.meta) {
+      payment.meta = { ...(payment.meta || {}), ...extra.meta };
+    }
+    await payment.save();
+    return { payment, fulfilled: false, alreadyPaid: false };
+  } else {
+    return { payment, fulfilled: false, alreadyPaid: false };
   }
+
+  const gatewayLabel = payment.gateway || "unknown";
 
   if (payment.purpose === "b2c_tryon" && payment.job) {
     const job = await TryonJob.findById(payment.job);
@@ -61,7 +97,7 @@ export async function applyVerifiedPayment(payment, verifiedStatus, extra = {}) 
         amount: payment.amount,
         currency: payment.currency,
         balance,
-        gateway: "mpesa",
+        gateway: gatewayLabel,
       });
     }
   }
@@ -83,7 +119,6 @@ export async function applyStkCallbackResult(parsed) {
     return { handled: false, reason: "payment_not_found" };
   }
 
-  // Light amount check when Safaricom sends Amount
   if (
     parsed.verifiedStatus === "paid" &&
     parsed.amount != null &&
@@ -92,6 +127,7 @@ export async function applyStkCallbackResult(parsed) {
     console.warn(
       `[mpesa] amount mismatch payment=${payment._id} expected=${payment.amount} got=${parsed.amount}`
     );
+    return { handled: true, fulfilled: false, reason: "amount_mismatch" };
   }
 
   const result = await applyVerifiedPayment(payment, parsed.verifiedStatus, {

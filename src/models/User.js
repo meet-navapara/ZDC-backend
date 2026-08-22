@@ -41,6 +41,9 @@ const userSchema = new Schema(
     phone: { type: String, trim: true },
     firstName: { type: String, trim: true },
     lastName: { type: String, trim: true },
+    // B2C billing market (B2B uses business.currency / business.address.country).
+    country: { type: String, trim: true, default: null },
+    currency: { type: String, trim: true, uppercase: true, default: null },
     passwordHash: { type: String, required: true },
     status: { type: String, enum: STATUSES, default: "active" },
     emailVerified: { type: Boolean, default: false },
@@ -73,6 +76,8 @@ userSchema.methods.toSafeJSON = function toSafeJSON() {
     createdAt: this.createdAt,
   };
   if (this.role === "b2c") {
+    base.country = this.country || null;
+    base.currency = this.currency || null;
     base.referralCode = this.referralCode || null;
     base.freeTryons = this.freeTryons || 0;
     base.referredBy = this.referredBy ? String(this.referredBy) : null;

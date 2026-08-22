@@ -17,11 +17,12 @@ const LEDGER_LABEL = { purchase: "Purchase", consume: "Try-on", adjust: "Adjustm
 export async function exportReport(req, res, next) {
   try {
     const businessId = req.user.sub;
-    const [user, stats, ledger] = await Promise.all([
+    const [user, stats, ledgerResult] = await Promise.all([
       User.findById(businessId),
       buildStats(businessId, { seriesDays: 30 }),
       listLedger(businessId, { limit: 200 }),
     ]);
+    const ledger = ledgerResult.entries;
 
     const shopName = user?.business?.name || user?.email || "zimji Business";
     const generatedAt = new Date();

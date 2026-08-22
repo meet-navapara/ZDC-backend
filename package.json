@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node --import ./src/instrument.js src/server.js",
     "dev": "nodemon --import ./src/instrument.js src/server.js",
-    "test": "node --test src/services/payments.test.js"
+    "test": "node --test src/services/payments.test.js",
+    "verify:perfectcorp": "node scripts/verify-perfectcorp.mjs"
   },
   "dependencies": {
     "@sentry/node": "^10.70.0",

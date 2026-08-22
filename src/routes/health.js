@@ -1,7 +1,8 @@
 import { Router } from "express";
 import mongoose from "mongoose";
 import { getRedis, isRedisEnabled } from "../config/redis.js";
-import { cacheGet, cacheSet } from "../services/cache.js";
+import { getRendererName, isPerfectCorpConfigured } from "../services/renderer.js";
+import { cloudinaryEnabled } from "../services/storage.js";
 
 const router = Router();
 
@@ -32,6 +33,9 @@ router.get("/", async (req, res) => {
     service: "zimji-backend",
     db: dbState === 1 ? "connected" : "disconnected",
     redis,
+    renderer: getRendererName(),
+    perfectcorpConfigured: isPerfectCorpConfigured(),
+    cloudinaryEnabled,
     time: new Date().toISOString(),
   });
 });

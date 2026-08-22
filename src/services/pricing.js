@@ -1,7 +1,10 @@
 import { Pricing } from "../models/Pricing.js";
 import { PACKS as DEFAULT_B2C_PACKS } from "../config/pricing.js";
 import { CREDIT_PACKS as DEFAULT_CREDIT_PACKS } from "../config/credits.js";
-import { localizePackAmount } from "../config/inrPricing.js";
+import {
+  localizePackAmount,
+  withDualPrices,
+} from "../config/inrPricing.js";
 import { resolveMarketGateway } from "./payments.js";
 import {
   cacheAside,
@@ -36,8 +39,15 @@ export async function getPricingSafe() {
   });
 }
 
-export async function getB2cPacks(user = null) {
+/**
+ * B2C packs. When `dualPrices` is true (consumer choice UI), attach KES+INR.
+ * Otherwise localize to the user's market currency.
+ */
+export async function getB2cPacks(user = null, { dualPrices = false } = {}) {
   const safe = await getPricingSafe();
+  if (dualPrices) {
+    return safe.b2cPacks.map((p) => withDualPrices(p));
+  }
   const currency = user ? resolveMarketGateway(user).currency : "KES";
   return safe.b2cPacks.map((p) => localizePackAmount(p, currency));
 }
@@ -48,10 +58,25 @@ export async function getCreditPacks(user = null) {
   return safe.creditPacks.map((p) => localizePackAmount(p, currency));
 }
 
-// Looks up a single B2C pack by id (DB-driven, config fallback via seed).
+export async function getCreditPacksDual() {
+  const safe = await getPricingSafe();
+  return safe.creditPacks.map((p) => withDualPrices(p));
+}
+
 export async function getPack(id, user = null) {
   const packs = await getB2cPacks(user);
   return packs.find((p) => p.id === id) || null;
+}
+
+/** Raw pack (KES base) by id — used when applying gateway-specific amount at pay. */
+export async function getPackBase(id) {
+  const safe = await getPricingSafe();
+  return safe.b2cPacks.find((p) => p.id === id) || null;
+}
+
+export async function getCreditPackBase(id) {
+  const safe = await getPricingSafe();
+  return safe.creditPacks.find((p) => p.id === id) || null;
 }
 
 // Looks up a single B2B credit pack by id.

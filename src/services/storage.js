@@ -9,6 +9,11 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { v2 as cloudinary } from "cloudinary";
+import {
+  MIN_TRYON_IMAGE_PX,
+  needsUpscale,
+  upscaleDimensions,
+} from "../utils/imageSize.js";
 
 const hasUrl = !!process.env.CLOUDINARY_URL;
 const hasVars = !!(
@@ -56,6 +61,57 @@ if (!cloudinaryEnabled) {
   }
 }
 
+function parseCloudinaryPublicId(url) {
+  const m = String(url).match(
+    /\/image\/upload\/(?:v\d+\/)?(.+?)(?:\.[a-zA-Z0-9]+)?(?:\?|$)/
+  );
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function scaledDeliveryUrl(publicId, width, height, min = MIN_TRYON_IMAGE_PX) {
+  if (!needsUpscale(width, height, min)) {
+    return cloudinary.url(publicId, { secure: true });
+  }
+  const next = upscaleDimensions(width, height, min);
+  return cloudinary.url(publicId, {
+    secure: true,
+    transformation: [{ width: next.width, height: next.height, crop: "scale" }],
+  });
+}
+
+/**
+ * Ensures a public image URL meets Perfect Corp minimum dimensions.
+ */
+export async function ensureMinImageSize(
+  url,
+  { min = MIN_TRYON_IMAGE_PX, folder = "zdc/scaled" } = {}
+) {
+  if (!url || !cloudinaryEnabled) return url;
+
+  const publicId = parseCloudinaryPublicId(url);
+  if (publicId) {
+    try {
+      const info = await cloudinary.api.resource(publicId, {
+        resource_type: "image",
+      });
+      return scaledDeliveryUrl(publicId, info.width, info.height, min);
+    } catch (err) {
+      console.warn("[storage] ensureMinImageSize resource:", err.message);
+    }
+  }
+
+  try {
+    const result = await cloudinary.uploader.upload(url, {
+      folder,
+      resource_type: "image",
+    });
+    return scaledDeliveryUrl(result.public_id, result.width, result.height, min);
+  } catch (err) {
+    console.warn("[storage] ensureMinImageSize upload:", err.message);
+    return url;
+  }
+}
+
 /**
  * Uploads an image buffer and returns a public URL + provider metadata.
  * @param {Buffer} buffer
@@ -69,10 +125,17 @@ export async function uploadImage(buffer, { folder = "zdc", originalName } = {})
         { folder, resource_type: "image" },
         (err, result) => {
           if (err) return reject(err);
+          const url = scaledDeliveryUrl(
+            result.public_id,
+            result.width,
+            result.height
+          );
           resolve({
-            url: result.secure_url,
+            url,
             publicId: result.public_id,
             provider: "cloudinary",
+            width: result.width,
+            height: result.height,
           });
         }
       );

@@ -17,7 +17,7 @@ export function generateOtpCode() {
  * Create / replace a pending signup OTP challenge.
  * @param {{ email: string, purpose: string, payload: object }}
  */
-export async function issueSignupOtp({ email, purpose, payload }) {
+export async function issueSignupOtp({ email, purpose, payload, onSend }) {
   const code = generateOtpCode();
   const codeHash = await bcrypt.hash(code, 10);
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
@@ -33,7 +33,11 @@ export async function issueSignupOtp({ email, purpose, payload }) {
   });
 
   if (!env.otpMock) {
-    await sendSignupOtpEmail(email, code);
+    if (typeof onSend === "function") {
+      await onSend(code);
+    } else {
+      await sendSignupOtpEmail(email, code);
+    }
   } else {
     console.log(`[otp] MOCK mode — code for ${email}: ${code}`);
   }

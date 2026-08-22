@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { User, ROLES } from "../models/User.js";
+import { User } from "../models/User.js";
 import { signToken } from "../utils/jwt.js";
 import { ensureReferralCode, getReferralStats } from "../services/referral.js";
 import {
@@ -9,13 +9,15 @@ import {
   loginPasswordField,
   optionalText,
   phoneField,
+  currencyField,
   LIMITS,
 } from "../utils/validators.js";
 
 const registerSchema = z.object({
   email: emailField,
   password: passwordField,
-  role: z.enum(ROLES).optional(),
+  // Public register never accepts admin — use scripts/create-admin.mjs instead.
+  role: z.enum(["b2c", "b2b"]).optional(),
   firstName: optionalText(LIMITS.name),
   lastName: optionalText(LIMITS.name),
   phone: phoneField,
@@ -126,6 +128,8 @@ const updateMeSchema = z.object({
   firstName: optionalText(LIMITS.name),
   lastName: optionalText(LIMITS.name),
   phone: phoneField,
+  country: optionalText(LIMITS.country),
+  currency: currencyField.optional().or(z.literal("")),
   currentPassword: loginPasswordField.optional().or(z.literal("")),
   newPassword: passwordField.optional().or(z.literal("")),
 });
@@ -142,6 +146,12 @@ export async function updateMe(req, res, next) {
     if (data.firstName !== undefined) user.firstName = data.firstName || null;
     if (data.lastName !== undefined) user.lastName = data.lastName || null;
     if (data.phone !== undefined) user.phone = data.phone || null;
+    if (user.role === "b2c") {
+      if (data.country !== undefined) user.country = data.country || null;
+      if (data.currency !== undefined) {
+        user.currency = data.currency ? String(data.currency).toUpperCase() : null;
+      }
+    }
 
     if (data.newPassword) {
       if (!data.currentPassword) {

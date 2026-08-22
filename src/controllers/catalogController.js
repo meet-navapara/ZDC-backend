@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Category, MAX_CATEGORIES_PER_BUSINESS } from "../models/Category.js";
+import { Category, MAX_CATEGORIES_PER_BUSINESS, TRY_ON_FEATURE_VALUES } from "../models/Category.js";
 import { Product, PRODUCT_STATUSES } from "../models/Product.js";
 import { uploadImage } from "../services/storage.js";
 import {
@@ -19,10 +19,21 @@ import {
 
 /* ----------------------------- Categories ----------------------------- */
 
+import { isValidHairColorPreset } from "../services/perfectcorp/features.js";
+
 const categorySchema = z.object({
   name: boundedText(LIMITS.categoryName, { min: 1 }),
   description: optionalText(LIMITS.shortDescription),
   order: z.number().int().min(0).max(9999).optional(),
+  tryOnFeature: z.enum(TRY_ON_FEATURE_VALUES).optional(),
+  hairColorPreset: z
+    .string()
+    .trim()
+    .optional()
+    .refine((v) => !v || isValidHairColorPreset(v), {
+      message: "Invalid hair color preset",
+    }),
+  beardTemplateId: optionalText(64).optional(),
 });
 
 export async function listCategories(req, res, next) {
@@ -59,6 +70,9 @@ export async function createCategory(req, res, next) {
       name: data.name,
       description: data.description || null,
       order: data.order ?? count,
+      tryOnFeature: data.tryOnFeature || "cloth",
+      hairColorPreset: data.hairColorPreset || null,
+      beardTemplateId: data.beardTemplateId || null,
     });
     await invalidateBusinessCatalog(req.user.sub);
     return res.status(201).json({ category: category.toJSONSafe() });
@@ -82,6 +96,13 @@ export async function updateCategory(req, res, next) {
     if (data.name !== undefined) category.name = data.name;
     if (data.description !== undefined) category.description = data.description || null;
     if (data.order !== undefined) category.order = data.order;
+    if (data.tryOnFeature !== undefined) category.tryOnFeature = data.tryOnFeature;
+    if (data.hairColorPreset !== undefined) {
+      category.hairColorPreset = data.hairColorPreset || null;
+    }
+    if (data.beardTemplateId !== undefined) {
+      category.beardTemplateId = data.beardTemplateId || null;
+    }
     await category.save();
     await invalidateBusinessCatalog(req.user.sub);
     return res.json({ category: category.toJSONSafe() });
